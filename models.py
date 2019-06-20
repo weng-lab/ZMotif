@@ -13,7 +13,7 @@ def construct_model(num_kernels=16, kernel_width=20, seq_len=None, dropout_prop=
     noisy_seq = GaussianNoise(gaussian_noise)(seq_input)
     rc_op = Lambda(lambda x: K.reverse(x,axes=(1,2)))
     noisy_seq_rc = rc_op(noisy_seq)
-    shared_conv = Conv1D(num_kernels, kernel_width, strides=1, padding='same', activation=activation, use_bias=False, kernel_initializer=kernel_initializer, kernel_regularizer=regularizers.l1(l1_reg), bias_initializer='zeros')
+    shared_conv = Conv1D(num_kernels, kernel_width, strides=1, padding='same', activation=activation, use_bias=False, kernel_initializer='orthogonal', kernel_regularizer=regularizers.l1(l1_reg), bias_initializer='zeros')
     conv_for = shared_conv(noisy_seq)
     conv_rc = shared_conv(noisy_seq_rc)
     merged = maximum([conv_for, conv_rc])

@@ -148,27 +148,30 @@ def main():
 #         swa = SWA(start_epoch=(num_epochs //2), 
 #                   interval=cycle_length)
     
-    model = construct_model(num_kernels=num_kernels, kernel_width=kernel_width, seq_len=None, optimizer=Adam(lr=0.1), 
+    steps_per_epoch = np.ceil((intervals_per_epoch / batch_size))
+    validation_steps = int((1 - train_test_split) * steps_per_epoch)
+    train_gen.set_batch_size(batch_size)
+    test_gen.set_batch_size(batch_size)
+    
+    adamw = AdamW(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=None, decay=0., weight_decay=0.025, batch_size=batch_size, samples_per_epoch=(batch_size * steps_per_epoch), epochs=num_epochs)
+    
+    model = construct_model(num_kernels=num_kernels, kernel_width=kernel_width, seq_len=None, optimizer=adamw, 
                             activation='linear', l1_reg=l1_reg, gaussian_noise = gaussian_noise)
     
     dense_weights = model.get_layer('dense_1').get_weights()[0]
     model.get_layer('dense_1').set_weights([0.01 * dense_weights])
     
-    for temp_batch_size in [4, 16]:
-        train_gen.set_batch_size(temp_batch_size)
-        test_gen.set_batch_size(temp_batch_size)
-        steps_per_epoch = np.ceil((intervals_per_epoch / temp_batch_size))
-        validation_steps = int((1 - train_test_split) * steps_per_epoch)
-        print("Training with a batch size of {}".format(temp_batch_size))
-        lr_schedule = CyclicLR(base_lr=0.01, max_lr=0.1, step_size=50*steps_per_epoch)
-        model.fit_generator(train_gen, steps_per_epoch=steps_per_epoch, epochs=100, validation_data=test_gen, validation_steps=validation_steps, callbacks=[lr_schedule], shuffle=True, use_multiprocessing=False, workers=1, max_queue_size=10, verbose=1)
+#     for temp_batch_size in [4, 16]:
+#         train_gen.set_batch_size(temp_batch_size)
+#         test_gen.set_batch_size(temp_batch_size)
+#         steps_per_epoch = np.ceil((intervals_per_epoch / temp_batch_size))
+#         validation_steps = int((1 - train_test_split) * steps_per_epoch)
+#         print("Training with a batch size of {}".format(temp_batch_size))
+#         lr_schedule = CyclicLR(base_lr=0.01, max_lr=0.1, step_size=50*steps_per_epoch)
+#         model.fit_generator(train_gen, steps_per_epoch=steps_per_epoch, epochs=100, validation_data=test_gen, validation_steps=validation_steps, callbacks=[lr_schedule], shuffle=True, use_multiprocessing=False, workers=1, max_queue_size=10, verbose=1)
     
     swa = SWA(prop = 0.2, interval = 1)
     
-    steps_per_epoch = np.ceil((intervals_per_epoch / batch_size))
-    validation_steps = int((1 - train_test_split) * steps_per_epoch)
-    train_gen.set_batch_size(batch_size)
-    test_gen.set_batch_size(batch_size)
     
     schedule = SGDRScheduler(min_lr=min_learning_rate,
                              max_lr=max_learning_rate,
@@ -188,7 +191,6 @@ def main():
     #callbacks_list = [schedule, swa, overfit_monitor]
     callbacks_list = [schedule, swa]
 
-#     adamw = AdamW(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=None, decay=0., weight_decay=0.025, batch_size=batch_size, samples_per_epoch=(batch_size * steps_per_epoch), epochs=num_epochs)
 #     adamw = AdamW(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=None, decay=0., weight_decay=0.025, batch_size=batch_size, samples_per_epoch=(batch_size * steps_per_epoch), epochs=num_epochs)
 #     adamw = AdamWOptimizer(weight_decay=0.1, learning_rate=.001)
     ## Construct Model
