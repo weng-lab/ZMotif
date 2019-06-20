@@ -1,40 +1,51 @@
 def construct_argument_parser():
     import argparse
     parser = argparse.ArgumentParser(description='Motif Finder')
-    parser.add_argument('-bg', '--bedgraph', help='Bedgraph file containing genomic coordinates and labels', type=str, required=True)
-    parser.add_argument('-g', '--genome_fasta', help='Genome fasta file', type=str, required=True)
-    parser.add_argument('-m', '--model_file', help='Model file (if provided, a new one will not be trained)', type=str, required=False, default=None)
+    parser.add_argument('-bed', '--bed_file', help='Bed file containing positive genomic coordinates', type=str, required=True)
+    parser.add_argument('-g', '--genome_file', help='Genome file to draw negative training samples from', type=str, required=True)
+    parser.add_argument('-genome', '--genome_fasta', help='Path to genome fasta file', type=str, required=True)
     parser.add_argument('-o', '--output_prefix', help='Prefix of output files', type=str, required=True)
     parser.add_argument('-e', '--num_epochs', help='Number of epochs to train', type=int, required=False, default=2000)
     parser.add_argument('-int', '--intervals_per_epoch', help='Number of intervals to train on per epoch', type=int, required=False, default=5000)
     parser.add_argument('-aug', '--aug_by', help='Perform data augmentation on training sequences', type=int, required=False, default=0)
-    parser.add_argument('-b', '--batch_size', help='Batch size for training', type=int, required=False, default=32)
+    parser.add_argument('-b', '--batch_size', help='Batch size for training', type=int, required=False, default=64)
     parser.add_argument('-split', '--train_test_split', help='Proportion of data to use for training', type=float, required=False, default=0.75)
     parser.add_argument('-k', '--num_kernels', help='Number of convolution kernels (motifs)', type=int, required=False, default=16)
     parser.add_argument('-w', '--kernel_width', help='Width of convolution kernels', type=int, required=False, default=40)
     parser.add_argument('-c', '--cycle_length', help='Cycle length for cyclical learning rate', type=int, required=False, default=5)
     parser.add_argument('-a', '--kernel_activation', help='Kernel activation function', type=str, required=False, default='linear')
     parser.add_argument('-gn', '--gaussian_noise', help='Absolute value of uniform distribution to draw noise from', type=float, required=False, default=0.0)
-    parser.add_argument('-l1', '--l1_reg', help='L1 Regularization', type=float, required=False, default=.000001) 
+    parser.add_argument('-l1', '--l1_reg', help='L1 Regularization', type=float, required=False, default=.0000005) 
     parser.add_argument('-swa', '--swa_start', help='Epoch to start stochastic weight averaging', required = False, type = int, default = None)
     return parser
 
 
 def main():
+    from numpy.random import seed
+    seed(12)
+    from tensorflow import set_random_seed
+    set_random_seed(12)
     from preprocess import bedtool_to_intervals, seq_lens_from_intervals
-    from data_generators import data_gen_from_intervals
-    from custom_callbacks import SWA, SGDRScheduler
+    from data_generators import data_gen_from_seqs
+    from custom_callbacks import SWA, SGDRScheduler, OverfitMonitor
     from models import construct_model
-    from postprocess import scan_intervals_for_kernels, hits_to_ppms
+    from postprocess import scan_fasta_for_kernels, hits_to_ppms
     from motif import ppms_to_meme
     from pybedtools import BedTool
     from pyfaidx import Fasta
     import numpy as np
-    from random import shuffle
+    import random
+    from keras.callbacks import EarlyStopping
+    from keras import backend as K
+    from AdamW import AdamW
+    from tensorflow.contrib.opt import AdamWOptimizer
+    #from altschulEriksonDinuclShuffle import dinuclShuffle
+    from dinuclShuffle import dinuclShuffle
+    import json
     
     args = construct_argument_parser().parse_args()
-    bedgraph = args.bedgraph
-    genome_fasta = args.genome_fasta
+    bed_file = args.bed_file
+    neg_fasta = args.neg_fasta
     model_file = args.model_file
     output_prefix = args.output_prefix
     num_epochs = args.num_epochs
@@ -49,6 +60,9 @@ def main():
     gaussian_noise = args.gaussian_noise
     l1_reg = args.l1_reg
     swa_start = args.swa_start
+    max_learning_rate = args.max_learning_rate
+    min_learning_rate = args.min_learning_rate
+    train_only = args.train_only
     
     ## Convert genome to pyfaidx Fasta
     genome = Fasta(genome_fasta,
