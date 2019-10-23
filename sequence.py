@@ -1,5 +1,16 @@
 import numpy as np
 
+class Sequence():
+    def __init__(self, seq, label, score=None):
+        self.seq = seq
+        self.encoded_seq = encode_sequence(seq, N = [0.25, 0.25, 0.25, 0.25])
+        self.label = int(label)
+        self.score = float(score)
+        self.length = len(seq)
+        
+    def __str__(self):
+        return "Seqeunce: " + self.seq[:5] + "..." + self.seq[-5:] + "; Length: {}; Label: {}; Score: {}".format(self.length, self.label, self.score) 
+
 def encode_sequence(seq, N = [0, 0, 0, 0]):
     d = { 'A' : [1, 0, 0, 0],
           'C' : [0, 1, 0, 0],
@@ -26,3 +37,4 @@ def decode_sequence(encoded_seq):
             decoded_seq_list.append('N')
 
     return "".join(decoded_seq_list)
+

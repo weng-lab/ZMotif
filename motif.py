@@ -5,7 +5,11 @@ def seq_list_to_ppm(seq_list):
     encoded_seq_list = [encode_sequence(seq, N = [0, 0, 0, 0]) for seq in seq_list]
     encoded_seq_array = np.array(encoded_seq_list)
     pfm = np.sum(encoded_seq_array, axis=0)
-    ppm = pfm / np.sum(pfm, axis=1).reshape((pfm.shape[0],1))
+    if np.min(np.sum(pfm, axis=1)) > 0:
+        ppm = pfm / np.sum(pfm, axis=1).reshape((pfm.shape[0],1))
+    else:
+        pfm += 0.25
+        ppm = pfm / np.sum(pfm, axis=1).reshape((pfm.shape[0],1))
     return ppm
 
 def pfm_to_ppm(pfm):
@@ -31,7 +35,6 @@ def calculate_information_content(ppm):
 def trim_ppm_on_information(ppm, min_info = 0.1):
     w = ppm.shape[0]
     info = calculate_information_content(ppm)
-    print(info)
     start_idx = 0
     end_idx = w
     for i in range(w):

@@ -11,10 +11,8 @@ num_lines = 0
 with open(bed_file) as f:
     for line in f:
         if num_lines == 0:
-            start = int(line.strip().split()[1])
-            stop = int(line.strip().split()[2])
-            w = stop - start
-            #print(w)
+            split = line.strip().split()
+            w = len(split[5])
         num_lines += 1
         
 motif_ids = ["" for i in range(num_lines)]
