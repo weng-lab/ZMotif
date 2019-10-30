@@ -225,11 +225,14 @@ class DataGenerator(Sequence):
 class DataGeneratorBg(Sequence):
     def __init__(self, seqs, max_seq_len, seqs_per_epoch=None, batch_size = 32, augment_by=0, pad_by = 0, background = 'uniform', return_labels = True, encode_sequence=True, shuffle_seqs=True):
         self.seqs = seqs
+        self.pos_seqs = [seq for seq in self.seqs if seq[1] == 1]
+        self.neg_seqs = [seq for seq in self.seqs if seq[1] == 0]
         self.num_seqs = len(seqs)
         self.max_seq_len = max_seq_len
         self.seqs_per_epoch = seqs_per_epoch
         self.augment_by = augment_by
         self.batch_size = batch_size
+        self.sample_size = self.batch_size // 2
         self.pad_by = pad_by
         self.n_iter = 0
         self.return_labels = return_labels
@@ -253,7 +256,9 @@ class DataGeneratorBg(Sequence):
 #         self.seqs.sort(reverse=True, key= lambda seq: seq[3])
 #         self.n_iter = 0
     def __getitem__(self, idx):
-        sample = self.get_sample__(self.seqs, len(self.seqs), self.batch_size, self.n_iter)
+#         sample = self.get_sample__(self.seqs, len(self.seqs), self.batch_size, self.n_iter)
+        pos_sample = self.get_sample__(self.pos_seqs, len(self.pos_seqs), self.sample_size, self.n_iter)
+        neg_sample = self.get_sample__(self.neg_seqs, len(self.neg_seqs), self.sample_size, self.n_iter)
         self.n_iter += 1
         output = 0.25 * np.ones((self.batch_size, self.max_seq_len + 2*self.pad_by + self.augment_by, 4))
         labels = []
@@ -266,7 +271,7 @@ class DataGeneratorBg(Sequence):
             else:
                 start_indices = np.array([((self.max_seq_len - seq[0].shape[0]) // 2) for seq in sample])
             start_indices += self.pad_by
-        for i, seq in enumerate(sample):
+        for i, seq in enumerate(pos_sample + neg_sample):
             if self.encode:
                 seq_len = len(seq[0])
             else:
@@ -286,7 +291,7 @@ class DataGeneratorBg(Sequence):
             return(output)
         
 class DataGeneratorCurriculum(Sequence):
-    def __init__(self, seqs, max_seq_len, seqs_per_epoch=None, batch_size = 32, augment_by=0, pad_by = 0, background = 'uniform', return_labels = True, encode_sequence=True, shuffle_seqs=True, curr_length=800, starting_frac = 0.1, cycle_length = 25, max_seqs = 30000):
+    def __init__(self, seqs, max_seq_len, seqs_per_epoch=None, batch_size = 32, augment_by=0, pad_by = 0, background = 'uniform', return_labels = True, encode_sequence=True, shuffle_seqs=True, curr_length=800, starting_frac = 1.0, cycle_length = 25, max_seqs = 3000000):
         self.seqs = seqs
         self.num_seqs = len(seqs)
         # sort sequences
@@ -308,6 +313,10 @@ class DataGeneratorCurriculum(Sequence):
         self.return_labels = return_labels
         self.encode = encode_sequence
         self.max_seqs = max_seqs
+        self.pos_seqs = [seq for seq in self.seqs_to_train if seq[1] == 1]
+#         self.neg_seqs = [seq for seq in self.seqs_to_train if seq[1] == 0]
+        self.neg_seqs = [seq for seq in self.seqs if seq[1] == 0]
+        
     
     def __len__(self):
         return int(self.seqs_per_epoch / float(self.batch_size))
@@ -323,7 +332,9 @@ class DataGeneratorCurriculum(Sequence):
             return(big_list[start_index:start_index + sample_size])
 
     def __getitem__(self, idx):
-        sample = self.get_sample__(self.seqs_to_train, len(self.seqs_to_train), self.batch_size, self.n_iter)
+#         sample = self.get_sample__(self.seqs_to_train, len(self.seqs_to_train), self.batch_size, self.n_iter)
+        pos_sample = self.get_sample__(self.pos_seqs, len(self.pos_seqs), self.batch_size//2, self.n_iter)
+        neg_sample = self.get_sample__(self.neg_seqs, len(self.neg_seqs), self.batch_size//2, self.n_iter)
         self.n_iter += 1
         output = 0.25 * np.ones((self.batch_size, self.max_seq_len + 2*self.pad_by + self.augment_by, 4))
         labels = []
@@ -336,7 +347,8 @@ class DataGeneratorCurriculum(Sequence):
             else:
                 start_indices = np.array([((self.max_seq_len - seq[0].shape[0]) // 2) for seq in sample])
             start_indices += self.pad_by
-        for i, seq in enumerate(sample):
+#         for i, seq in enumerate(sample):
+        for i, seq in enumerate(pos_sample + neg_sample):
             if self.encode:
                 seq_len = len(seq[0])
             else:
@@ -363,11 +375,14 @@ class DataGeneratorCurriculum(Sequence):
             self.seqs.sort(reverse=True, key=lambda seq: seq[3])
             if self.seq_index < self.max_seqs:
                 self.seqs_to_train = self.seqs[:self.seq_index]
-                print("Training on {} % of sequences".format(int(100*self.frac)))
+                #print("Training on {} % of sequences".format(int(100*self.frac)))
             else:
                 self.seqs_to_train = self.seqs[:self.max_seqs]
-                print("Training on the max ({}) number of sequences".format(self.max_seqs))
+                #print("Training on the max ({}) number of sequences".format(self.max_seqs))
             random.shuffle(self.seqs_to_train)
+            self.pos_seqs = [seq for seq in self.seqs_to_train if seq[1] == 1]
+#             self.neg_seqs = [seq for seq in self.seqs_to_train if seq[1] == 0]
+            self.neg_seqs = [seq for seq in self.seqs if seq[1] == 0]
             self.n_iter = 0
         elif self.epoch == self.curr_length:
             self.seqs.sort(reverse=True, key=lambda seq: seq[3])
@@ -376,6 +391,9 @@ class DataGeneratorCurriculum(Sequence):
             else:
                 self.seqs_to_train = self.seqs[:self.max_seqs]
             random.shuffle(self.seqs_to_train)
+            self.pos_seqs = [seq for seq in self.seqs_to_train if seq[1] == 1]
+#             self.neg_seqs = [seq for seq in self.seqs_to_train if seq[1] == 0]
+            self.neg_seqs = [seq for seq in self.seqs if seq[1] == 0]
             self.n_iter = 0
         else:
             pass

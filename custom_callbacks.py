@@ -2,6 +2,8 @@ from keras.callbacks import Callback
 # from data_generators import DataGeneratorDinucShuffle
 from keras import backend as K
 import numpy as np
+from utils import progress
+import sys
 
 class SGDRScheduler(Callback):
     '''Cosine annealing learning rate scheduler with periodic restarts.
@@ -121,7 +123,6 @@ class SWA(Callback):
     def on_train_end(self, logs=None):
         if self.epoch > 10:
             num_models_to_average = int(np.ceil(self.prop * self.epoch))
-            print("Will average last {} models".format(num_models_to_average))
 #         print(len(self.models_weights))
 #         print(len(self.models_weights[0]))
 #         print(self.models_weights[0][0].shape)
@@ -133,6 +134,25 @@ class SWA(Callback):
 #         print(avg_dense_weights.shape)
             self.model.set_weights([avg_conv_weights, avg_dense_weights])
 
+import time
+
+class ProgBar(Callback):
+    def __init__(self,
+                 num_epochs):
+    
+        self.num_epochs = num_epochs
+        self.start_time = time.time()
+        self.stop_time = time.time()
+    def on_epoch_start(self, epoch, logs=None):
+        self.start_time = time.time()
+
+    def on_epoch_end(self, epoch, logs=None):
+        self.stop_time = time.time()
+        time_remaining = ((self.stop_time - self.start_time) * (self.num_epochs - epoch)) // 60
+        progress(epoch + 1, self.num_epochs, status='Training Model')
+        
+    def on_train_end(self, logs=None):
+        sys.stdout.write("\n")
     
 class OverfitMonitor(Callback):
     def __init__(self, max_delta=0.1, patience=5):
@@ -163,26 +183,29 @@ class OverfitMonitor(Callback):
             print("Setting weights to that of best model")
             self.model.set_weights(self.best_model_weights)
 
-class SequentialKernelAddition(Callback):
+class AntiMotifChecker(Callback):
     def on_train_begin(self, logs={}):
-        self.initial_weights = self.model.get_layer("conv1d_1").get_weights()[0]
-        self.num_kernels = self.initial_weights.shape[2]
-        self.kernel_width = self.initial_weights.shape[0]
+        initial_weights = self.model.get_layer("conv1d_1").get_weights()[0]
+        self.num_kernels = initial_weights.shape[2]
+        self.kernel_width = initial_weights.shape[0]
 
-        self.current_weights = np.zeros((self.kernel_width, 4, self.num_kernels))
-        self.current_weights[:,:,0] = self.initial_weights[:,:,0]
-        self.model.get_layer("conv1d_1").set_weights([self.current_weights])
-        self.dense_weights = np.zeros((self.num_kernels,1))
-        self.dense_weights[0,0] = .01
-        self.model.get_layer("dense_1").set_weights([self.dense_weights])
-        self.on_kernel = 0
     def on_epoch_end(self, epoch, logs={}):
-        if (epoch + 1) % 25 == 0 and self.on_kernel < (self.num_kernels - 1):
-            self.on_kernel += 1
-            print("Adding kernel {}".format(self.on_kernel+1))
-            self.conv_weights = self.model.get_layer("conv1d_1").get_weights()[0]
-            self.dense_weights = self.model.get_layer("dense_1").get_weights()[0]
-            self.conv_weights[:,:,self.on_kernel] = self.initial_weights[:,:,self.on_kernel]
-            self.dense_weights[self.on_kernel,0] = 0.01
-            self.model.get_layer("conv1d_1").set_weights([self.conv_weights])
-            self.model.get_layer("dense_1").set_weights([self.dense_weights])
+#         if epoch > 80 and epoch < 100:
+        if epoch == 80:
+            conv_weights = self.model.get_layer("conv1d_1").get_weights()[0]
+            #print(conv_weights)
+            for i in range(self.num_kernels):
+                for w in range(self.kernel_width):
+                    if np.max(conv_weights[w,:,i]) < 1:
+                        conv_weights[w,:,i] = np.array([0.0,0.0,0.0,0.0])
+                        #print("kernel {} position {} set to 0.0".format(i, w))
+                    else:
+                        continue
+                for w in range(self.kernel_width):
+                    index = self.kernel_width - w - 1
+                    if np.max(conv_weights[index,:,i]) < 1:
+                        conv_weights[index,:,i] = np.array([0.0,0.0,0.0,0.0])
+                        #print("kernel {} position {} set to 0.0".format(i, index))
+                    else:
+                        continue
+            self.model.get_layer("conv1d_1").set_weights([conv_weights])

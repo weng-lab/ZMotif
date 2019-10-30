@@ -18,27 +18,35 @@ def bg_to_seqs(bg, fasta, max_seq_len, store_encoded=False):
                 # Get center of positive sequence
                 new_start = start + input_seq_len//2 - (max_seq_len // 2)
                 new_stop = new_start + max_seq_len
+                coord = chrom + ":" + str(new_start) + "-" + str(new_stop)
                 try:
+                    pos_seq = genome[chrom][new_start:new_stop]
+                    left_seq = genome[chrom][start-max_seq_len:start]
+                    right_seq = genome[chrom][stop:stop+max_seq_len]
                     if store_encoded:
-                        seqs.append([encode_sequence(genome[chrom][new_start:new_stop]), 1, 1, score, chrom + ":" + str(new_start) + "-" + str(new_stop)])
-                        seqs.append([encode_sequence(genome[chrom][start-max_seq_len:start]), 0, 1, score, chrom + ":" + str(new_start) + "-" + str(new_stop)])
-                        seqs.append([encode_sequence(genome[chrom][stop:stop+max_seq_len]), 0, 1, score, chrom + ":" + str(new_start) + "-" + str(new_stop)])
+                        seqs.append([encode_sequence(pos_seq), 1, 1, score, coord])
+                        seqs.append([encode_sequence(left_seq), 0, 1, score, coord])
+                        seqs.append([encode_sequence(right_seq), 0, 1, score, coord])
                     else:
-                        seqs.append([genome[chrom][new_start:new_stop], 1, 1, score, chrom + ":" + str(new_start) + "-" + str(new_stop)])
-                        seqs.append([genome[chrom][start-max_seq_len:start], 0, 1, score, chrom + ":" + str(new_start) + "-" + str(new_stop)])
-                        seqs.append([genome[chrom][stop:stop+max_seq_len], 0, 1, score, chrom + ":" + str(new_start) + "-" + str(new_stop)])
+                        seqs.append([pos_seq, 1, 1, score, coord])
+                        seqs.append([left_seq, 0, 1, score, coord])
+                        seqs.append([right_seq, 0, 1, score, coord])
                 except KeyError:
                     pass
             else:
                 try:
+                    coord = chrom + ":" + str(start) + "-" + str(stop)
+                    pos_seq = genome[chrom][start:stop]
+                    left_seq = genome[chrom][start-input_seq_len:start]
+                    right_seq = genome[chrom][stop:stop+input_seq_len]
                     if store_encoded:
-                        seqs.append([encode_sequence(genome[chrom][start:stop]), 1, 1, score, chrom + ":" + str(start) + "-" + str(stop)])
-                        seqs.append([encode_sequence(genome[chrom][start-input_seq_len:start]), 0, 1, score, chrom + ":" + str(start) + "-" + str(stop)])
-                        seqs.append([encode_sequence(genome[chrom][stop:stop+input_seq_len]), 0, 1, score, chrom + ":" + str(start) + "-" + str(stop)])
+                        seqs.append([encode_sequence(pos_seq), 1, 1, score, coord])
+                        seqs.append([encode_sequence(left_seq), 0, 1, score, coord])
+                        seqs.append([encode_sequence(right_seq), 0, 1, score, coord])
                     else:
-                        seqs.append([genome[chrom][start:stop], 1, 1, score, chrom + ":" + str(start) + "-" + str(stop)])
-                        seqs.append([genome[chrom][start-input_seq_len:start], 0, 1, score, chrom + ":" + str(start) + "-" + str(stop)])
-                        seqs.append([genome[chrom][stop:stop+input_seq_len], 0, 1, score, chrom + ":" + str(start) + "-" + str(stop)])
+                        seqs.append([genome[chrom][start:stop], 1, 1, score, coord])
+                        seqs.append([genome[chrom][start-input_seq_len:start], 0, 1, score, coord])
+                        seqs.append([genome[chrom][stop:stop+input_seq_len], 0, 1, score, coord])
                 except KeyError:
                     pass
                 

@@ -32,8 +32,7 @@ def construct_model(num_kernels=1, kernel_width=20, seq_len=None, dropout_prop=0
     pooled = GlobalMaxPooling1D()(merged)
     output = Dense(num_classes, activation='sigmoid', use_bias=False, kernel_initializer=initializers.Ones(), kernel_constraint=non_neg(), bias_initializer='zeros')(pooled)
     model = Model(inputs=seq_input, outputs=output)
-    model.compile(optimizer=optimizer, loss='binary_crossentropy', metrics=['accuracy'])
-    print(model.summary())
+    model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
     return model
 
 def construct_scan_model(conv_weights):
@@ -56,7 +55,6 @@ def construct_scan_model(conv_weights):
     model = Model(inputs=seq, outputs=conv_seq)
     model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
     model.get_layer('scan_conv').set_weights([conv_weights])
-    print(model.summary())
     return model
 
 def construct_fnn(num_kernels = 32,

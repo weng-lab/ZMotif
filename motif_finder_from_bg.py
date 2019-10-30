@@ -5,7 +5,7 @@ def construct_argument_parser():
     parser.add_argument('-g', '--genome', help='Genome fasta file', type=str, required=True)
     parser.add_argument('-o', '--output_prefix', help='Prefix of output files', type=str, required=True)
     parser.add_argument('-e', '--num_epochs', help='Number of epochs to train', type=int, required=False, default=2000)
-    parser.add_argument('-l', '--max_seq_length', help='Trim sequences greater than', type=str, required=False, default=500)
+    parser.add_argument('-l', '--max_seq_length', help='Trim sequences greater than', type=str, required=False, default=200)
     parser.add_argument('-int', '--intervals_per_epoch', help='Number of intervals to train on per epoch', type=int, required=False, default=5000)
     parser.add_argument('-aug', '--aug_by', help='Perform data augmentation on training sequences', type=int, required=False, default=40)
     parser.add_argument('-b', '--batch_size', help='Batch size for training', type=int, required=False, default=32)
@@ -15,13 +15,14 @@ def construct_argument_parser():
     parser.add_argument('-c', '--cycle_length', help='Cycle length for cyclical learning rate', type=int, required=False, default=1)
     parser.add_argument('-a', '--kernel_activation', help='Kernel activation function', type=str, required=False, default='linear')
     parser.add_argument('-gn', '--gaussian_noise', help='Absolute value of uniform distribution to draw noise from', type=float, required=False, default=0.0)
-    parser.add_argument('-l1', '--l1_reg', help='L1 Regularization', type=float, required=False, default=0.00000001) 
+    parser.add_argument('-l1', '--l1_reg', help='L1 Regularization', type=float, required=False, default=0.000000001) 
     parser.add_argument('-swa', '--swa_start', help='Epoch to start stochastic weight averaging', required = False, type = int, default = None)
     parser.add_argument('-max_lr', '--max_learning_rate', help='Maximum learning rate', required = False, type = float, default = 0.1)
     parser.add_argument('-min_lr', '--min_learning_rate', help='Minimum learning rate', required = False, type = float, default = 0.01)
     parser.add_argument('-train_only', '--train_only', help='Only train classifier', required = False, type = bool, default = False)
-    parser.add_argument('-mode', '--mode', help='Mode for number of motif instances per sequence', required = False, type = str, choices = ["zoops", "anr"], default = "anr")
+    parser.add_argument('-mode', '--mode', help='Mode for number of motif instances per sequence', required = False, type = str, choices = ["zoops", "anr"], default = "zoops")
     parser.add_argument('-curr', '--curriculum_mode', help='Use curriculum learning', required = False, type = bool, default = False)
+    parser.add_argument('-model', '--model_file', help='Model from previous run to continue training', required = False, type = str, default = None)
     return parser
 
 
@@ -33,9 +34,9 @@ def main():
     
     from preprocess import bg_to_seqs, bg_to_fasta
     from data_generators import DataGeneratorBg, DataGeneratorCurriculum
-    from custom_callbacks import SWA, SGDRScheduler, SequentialKernelAddition
+    from custom_callbacks import SWA, SGDRScheduler, ProgBar, AntiMotifChecker
     from models import construct_model
-    from postprocess import scan_fasta_for_kernels, hits_to_ppms
+    from postprocess import scan_fasta_for_kernels, hits_to_ppms, scan_seqs_for_kernels
     from motif import ppms_to_meme
     from pybedtools import BedTool
     from pyfaidx import Fasta
@@ -51,6 +52,9 @@ def main():
     from keras.optimizers import Adam
     from sklearn.metrics import roc_auc_score, roc_curve
     import pickle
+    from subprocess import PIPE, run
+    import os
+    from utils import read_hdf5
     
     args = construct_argument_parser().parse_args()
     input_file = args.input
@@ -73,27 +77,26 @@ def main():
     min_learning_rate = args.min_learning_rate
     train_only = args.train_only
     mode = args.mode
-    use_curriculum = True
     store_encoded = True
-    
+#     pad_by = 0
+    pad_by = kernel_width
     encode_sequence = True
     if store_encoded:
         encode_sequence = False
-    
-    print(encode_sequence)
+        
+        
     seqs = bg_to_seqs(input_file, genome_fasta, max_seq_len, store_encoded=store_encoded)  
-    bg_to_fasta(input_file, genome_fasta, output_prefix + ".pos.fasta")
     
     num_pos = len([seq for seq in seqs if seq[1] == 1])
     num_neg = len([seq for seq in seqs if seq[1] == 0])
     # Adjust sample weights based on relative class frequencies
-    for i, seq in enumerate(seqs):
-        if seq[1] == 1:
-            seqs[i][2] = num_neg / num_pos
+#     for i, seq in enumerate(seqs):
+#         if seq[1] == 1:
+#             seqs[i][2] = num_neg / num_pos
             
     
     # Adjsut sample weights based on rank
-    seqs.sort(key= lambda seq: seq[3], reverse=True)
+#     seqs.sort(key= lambda seq: seq[3], reverse=True)
 #     for i, seq in enumerate(seqs):
 #         if seq[1] == 1:
 #             seqs[i][2] = seqs[i][2] - (i/(num_pos+num_neg))
@@ -110,37 +113,29 @@ def main():
         steps_per_epoch = len(train_seqs) // batch_size
         validation_steps = len(test_seqs) // batch_size
     
-    print("Train steps: {}".format(steps_per_epoch))
-    print("Test steps: {}".format(validation_steps))
-    #steps_per_epoch = np.ceil((intervals_per_epoch / batch_size))
     validation_steps = int((1 - train_test_split) * steps_per_epoch)
     
-    train_seqs.sort(reverse=True, key= lambda seq: seq[3]) 
+#     train_seqs.sort(reverse=True, key= lambda seq: seq[3]) 
     
-    if not use_curriculum:
-        print("I'm here")
-        train_gen = DataGeneratorBg(train_seqs, max_seq_len, batch_size=batch_size,
-                                  augment_by=aug_by, pad_by=kernel_width, seqs_per_epoch=intervals_per_epoch,
-                                   encode_sequence=encode_sequence)
-
-        test_gen = DataGeneratorBg(test_seqs, max_seq_len, batch_size=batch_size,
-                                  augment_by=aug_by, pad_by=kernel_width, seqs_per_epoch=validation_steps*batch_size,
-                                  encode_sequence=encode_sequence)
-        
-    else:
-        train_gen = DataGeneratorCurriculum(train_seqs, max_seq_len, batch_size=batch_size,
+    train_gen = DataGeneratorBg(train_seqs, max_seq_len, batch_size=batch_size,
                                   augment_by=aug_by, pad_by=kernel_width, seqs_per_epoch=intervals_per_epoch, encode_sequence=encode_sequence)
 
-        test_gen = DataGeneratorBg(test_seqs, max_seq_len, batch_size=batch_size,
-                                  augment_by=aug_by, pad_by=kernel_width, seqs_per_epoch=validation_steps*batch_size, encode_sequence=encode_sequence)
+    test_gen = DataGeneratorBg(test_seqs, max_seq_len, batch_size=batch_size,
+                              augment_by=aug_by, pad_by=kernel_width, seqs_per_epoch=validation_steps*batch_size,
+                              encode_sequence=encode_sequence)
+        
+#     train_gen = DataGeneratorCurriculum(train_seqs, max_seq_len, batch_size=batch_size,
+#                                   augment_by=aug_by, pad_by=pad_by, seqs_per_epoch=intervals_per_epoch, encode_sequence=encode_sequence)
+
+#     test_gen = DataGeneratorBg(test_seqs, max_seq_len, batch_size=batch_size,
+#                               augment_by=aug_by, pad_by=pad_by, seqs_per_epoch=validation_steps*batch_size, encode_sequence=encode_sequence)
     
     
     ## Define callbacks
     
-    adamw = AdamW(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=None, decay=0., weight_decay=0.025, batch_size=batch_size, samples_per_epoch=(batch_size * steps_per_epoch), epochs=num_epochs)
+#     adamw = AdamW(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=None, decay=0., weight_decay=0.025, batch_size=batch_size, samples_per_epoch=(batch_size * steps_per_epoch), epochs=num_epochs)
     
-    model = construct_model(num_kernels=num_kernels, kernel_width=kernel_width, seq_len=None, optimizer=adamw, 
-                            activation='linear', l1_reg=l1_reg, gaussian_noise = gaussian_noise)
+    model = construct_model(num_kernels=num_kernels, kernel_width=kernel_width, seq_len=None, optimizer='adam', activation='linear', l1_reg=l1_reg, gaussian_noise = gaussian_noise)
     
     dense_weights = model.get_layer('dense_1').get_weights()[0]
     model.get_layer('dense_1').set_weights([0.01 * dense_weights])
@@ -155,26 +150,23 @@ def main():
                              cycle_length=cycle_length,
                              mult_factor=1.0)
     
-    ska = SequentialKernelAddition()
-#     early_stopping = EarlyStopping(monitor='val_loss',
-#                                    patience=5,
-#                                    verbose=0,
-#                                    restore_best_weights=True)
+
+    progbar = ProgBar(num_epochs)
+    anti_motif = AntiMotifChecker()
+#     callbacks_list = [schedule, progbar, anti_motif, swa]
     
-#     callbacks_list = [schedule, swa, ska]
-    callbacks_list = [schedule, swa]
-    
+    callbacks_list = [schedule, progbar, swa]
     history = model.fit_generator(train_gen,
                                   steps_per_epoch=steps_per_epoch,
                                   epochs=num_epochs,
                                   validation_data=test_gen,
                                   validation_steps=validation_steps,
                                   callbacks=callbacks_list,
-                                  shuffle=False,
+                                  shuffle=True,
                                   use_multiprocessing=False,
                                   workers=1,
                                   max_queue_size=10,
-                                  verbose=2)
+                                  verbose=0)
     
     model_file = output_prefix + ".weights.h5"
     model.save_weights(model_file)
@@ -216,7 +208,8 @@ def main():
     if not train_only:
         
         bed_file = output_prefix + ".bed"
-        pos_hits = scan_fasta_for_kernels(output_prefix + ".pos.fasta", conv_weights, output_prefix, mode = mode, scan_pos_only = True)
+#         pos_hits = scan_fasta_for_kernels(output_prefix + ".pos.fasta", conv_weights, output_prefix, mode = mode, scan_pos_only = True)
+        pos_hits = scan_seqs_for_kernels([seq for seq in seqs if seq[1] == 1], conv_weights, output_prefix, mode = mode, scan_pos_only = True)
         #neg_hits = scan_fasta_for_kernels(neg_fasta, model_file, output_prefix, scan_pos_only = True)
         with open(bed_file, "w") as f:
             #for hit in pos_hits + neg_hits:
@@ -226,23 +219,43 @@ def main():
 
 
         raw_ppms, trimmed_ppms = hits_to_ppms(pos_hits)
-
+        raw_ppms.sort(key = lambda ppm: ppm[1], reverse=True)
         raw_meme_file = output_prefix + ".raw.meme"
         trimmed_meme_file = output_prefix + ".trimmed.meme"
 
         ppms_to_meme(raw_ppms, raw_meme_file)
         ppms_to_meme(trimmed_ppms, trimmed_meme_file)
         
-        ppms_rc = []
-        for ppm in raw_ppms:
-            rc_ppm = ppm[2][::-1,::-1]
-            ppms_rc.append((ppm[0], ppm[1], rc_ppm))
+        tomtom_command = ["tomtom", raw_meme_file, "/home/andrewsg/motif_dbs/HOCOMOCOv11_full_HUMAN_mono_meme_format.meme", "--text"]
+        result = run(tomtom_command, stdout=PIPE, stderr=PIPE, universal_newlines=True)
+        tomtom_results = result.stdout.split("\n")
+        tomtom_results = [line.split() for line in tomtom_results if len(line.split()) > 0]
         
-        rc_meme_file = output_prefix + ".rc.meme"
-        ppms_to_meme(ppms_rc, rc_meme_file)
+        motif_dict = {}
+        for motif in raw_ppms:
+            motif_id, n, ppm = motif
+            motif_dict[motif_id] = {'id' : motif_id,
+                         'n_sites' : n,
+                         'ppm' : ppm.tolist()}
+            matches = [line[1] for line in tomtom_results if line[0] == motif_id]
+            if len(matches) > 0:
+                motif_dict[motif_id]["hoc_matches"] = matches
+                motif_dict[motif_id]["hoc_p_values"] = [float(line[3]) for line in tomtom_results if line[0] == motif_id]
+            else:
+                motif_dict[motif_id]["hoc_matches"] = ["No Match"]
+                motif_dict[motif_id]["hoc_p_values"] = [1]
             
+            motif_index = int(motif_id.split("_")[1]) - 1
+            motif_dict[motif_id]["conv_kernel"] = conv_weights[:,:,motif_index].tolist()
+        output_json = output_prefix + ".json"
+        with open(output_json, "w") as f:
+            f.write(json.dumps(motif_dict))
             
-            
-    
+        #Plot results
+        dirpath = os.getcwd()
+        script_dir = os.path.dirname(os.path.realpath(__file__))
+        plots_file = output_prefix + ".pdf"
+        plot_cmd = ["Rscript", "--vanilla", script_dir + "/plot_results.R", output_json, plots_file]
+        junk = run(plot_cmd, stdout=PIPE, stderr=PIPE, universal_newlines=True)
 if __name__ == '__main__':
     main()
