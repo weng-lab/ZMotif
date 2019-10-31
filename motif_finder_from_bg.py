@@ -32,11 +32,11 @@ def main():
     from tensorflow import set_random_seed
     set_random_seed(12)
     
-    from preprocess import bg_to_seqs, bg_to_fasta
-    from data_generators import DataGeneratorBg, DataGeneratorCurriculum
+    from preprocess import bg_to_seqs, narrowpeak_to_seqs
+    from data_generators import DataGeneratorBg
     from custom_callbacks import SWA, SGDRScheduler, ProgBar, AntiMotifChecker
     from models import construct_model
-    from postprocess import scan_fasta_for_kernels, hits_to_ppms, scan_seqs_for_kernels
+    from postprocess import hits_to_ppms, scan_seqs_for_kernels
     from motif import ppms_to_meme
     from pybedtools import BedTool
     from pyfaidx import Fasta
@@ -77,18 +77,20 @@ def main():
     min_learning_rate = args.min_learning_rate
     train_only = args.train_only
     mode = args.mode
-    store_encoded = True
-#     pad_by = 0
-    pad_by = kernel_width
-    encode_sequence = True
+    store_encoded = False
+    redraw = True
     if store_encoded:
         encode_sequence = False
+    else:
+        encode_sequence = True
         
-        
-    seqs = bg_to_seqs(input_file, genome_fasta, max_seq_len, store_encoded=store_encoded)  
+#     seqs = bg_to_seqs(input_file, genome_fasta, max_seq_len, store_encoded=store_encoded)  
+    seqs = narrowpeak_to_seqs(input_file, genome_fasta, max_seq_len, store_encoded=store_encoded, negs_from="flank")
     
     num_pos = len([seq for seq in seqs if seq[1] == 1])
     num_neg = len([seq for seq in seqs if seq[1] == 0])
+    print("Number of positive sequences: {}".format(num_pos))
+    print("Number of negative sequences: {}".format(num_neg))
     # Adjust sample weights based on relative class frequencies
 #     for i, seq in enumerate(seqs):
 #         if seq[1] == 1:
@@ -105,7 +107,8 @@ def main():
     random.shuffle(seqs)
     train_seqs = seqs[:int(train_test_split*len(seqs))]
     test_seqs = seqs[int(train_test_split*len(seqs)):]
-    
+    print("Training on {} sequences".format(len(train_seqs)))
+    print("Testing on {} sequences".format(len(test_seqs)))
     if intervals_per_epoch is not None:
         steps_per_epoch = intervals_per_epoch // batch_size
         validation_steps = steps_per_epoch // 3
@@ -118,11 +121,10 @@ def main():
 #     train_seqs.sort(reverse=True, key= lambda seq: seq[3]) 
     
     train_gen = DataGeneratorBg(train_seqs, max_seq_len, batch_size=batch_size,
-                                  augment_by=aug_by, pad_by=kernel_width, seqs_per_epoch=intervals_per_epoch, encode_sequence=encode_sequence)
+                                  augment_by=aug_by, pad_by=kernel_width, seqs_per_epoch=intervals_per_epoch, encode_sequence=encode_sequence, redraw=redraw)
 
     test_gen = DataGeneratorBg(test_seqs, max_seq_len, batch_size=batch_size,
-                              augment_by=aug_by, pad_by=kernel_width, seqs_per_epoch=validation_steps*batch_size,
-                              encode_sequence=encode_sequence)
+                              augment_by=aug_by, pad_by=kernel_width, seqs_per_epoch=validation_steps*batch_size, encode_sequence=encode_sequence, redraw=False)
         
 #     train_gen = DataGeneratorCurriculum(train_seqs, max_seq_len, batch_size=batch_size,
 #                                   augment_by=aug_by, pad_by=pad_by, seqs_per_epoch=intervals_per_epoch, encode_sequence=encode_sequence)
@@ -209,7 +211,7 @@ def main():
         
         bed_file = output_prefix + ".bed"
 #         pos_hits = scan_fasta_for_kernels(output_prefix + ".pos.fasta", conv_weights, output_prefix, mode = mode, scan_pos_only = True)
-        pos_hits = scan_seqs_for_kernels([seq for seq in seqs if seq[1] == 1], conv_weights, output_prefix, mode = mode, scan_pos_only = True)
+        pos_hits = scan_seqs_for_kernels([seq for seq in seqs if seq[1] == 1], conv_weights, output_prefix, mode = mode, scan_pos_only = True, store_encoded=store_encoded)
         #neg_hits = scan_fasta_for_kernels(neg_fasta, model_file, output_prefix, scan_pos_only = True)
         with open(bed_file, "w") as f:
             #for hit in pos_hits + neg_hits:

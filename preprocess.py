@@ -2,6 +2,7 @@ import numpy as np
 from pyfaidx import Fasta
 from pybedtools import BedTool
 from sequence import encode_sequence
+from dinuclShuffle import dinuclShuffle
 
 def bg_to_seqs(bg, fasta, max_seq_len, store_encoded=False):
            
@@ -60,8 +61,41 @@ def bg_to_seqs(bg, fasta, max_seq_len, store_encoded=False):
 
     return seqs
 
-def bg_to_fasta(bg, genome_fasta, output_fasta):
-    bt = BedTool(bg)
-    bt.sequence(fi=genome_fasta)
-    with open(output_fasta, "w") as fasta:
-        print(open(bt.seqfn).read(), file=fasta)
+def narrowpeak_to_seqs(peak_file, genome_fasta, seq_len, store_encoded=False, negs_from="shuffle"):
+    genome = Fasta(genome_fasta, as_raw=True, sequence_always_upper=True)
+    seqs = []
+    with open(peak_file, "r") as f:
+        for line in f:
+            chrom, start, stop, _, _, _, signal, _, _, offset = line.strip().split()
+            start = int(start)
+            stop = int(stop)
+            signal = float(signal)
+            offset = int(offset)
+            center = (stop - start) // 2 + start
+            summit = start + offset
+            w_2 = seq_len // 2
+            seq_start = summit - w_2
+            seq_stop = summit + w_2
+            coord = chrom + ":" + str(seq_start) + "-" + str(seq_stop)
+            try:
+                pos_seq = genome[chrom][seq_start:seq_stop]
+                neg_seq = dinuclShuffle(pos_seq)
+                if store_encoded:
+                    seqs.append([encode_sequence(pos_seq), 1, 1, signal, coord])
+                    seqs.append([encode_sequence(neg_seq), 0, 1, signal, coord])
+                else:
+                    seqs.append([pos_seq, 1, 1, signal, coord])
+                    seqs.append([neg_seq, 0, 1, signal, coord])
+            except KeyError:
+                print("{} not in genome fasta".format(coord))
+            
+                
+    for seq in seqs:
+        if store_encoded:
+            if seq[0].shape[0] == 0:
+                seqs.remove(seq)
+        else:
+            if len(seq[0]) == 0:
+                seqs.remove(seq)
+
+    return seqs

@@ -7,89 +7,7 @@ import numpy as np
 from utils import progress
 import sys
 
-def scan_fasta_for_kernels(fasta_file, conv_weights, output_prefix, mode = 'anr', scan_pos_only = True):
-  
-    fasta = Fasta(fasta_file,
-                   as_raw=True,
-                   sequence_always_upper=True)
-    
-    coords = list(fasta.keys())
-    
-    #model = load_model(model_file)
-    #conv_weights = model.get_layer('conv1d_1').get_weights()[0]
-    kernel_width = conv_weights.shape[0]
-    num_kernels = conv_weights.shape[2]
-    w2 = kernel_width // 2
-    
-    scan_model = construct_scan_model(conv_weights)
-    num_sites = 0
-    hits = []
-    for index, seq in enumerate(fasta):
-        if index % 1000 == 0:
-            # update progress bar
-            progress(index, len(coords), "scanning sequences")
-
-        chrom = coords[index].split(":")[0]
-        try:
-            start = int(coords[index].split(":")[1].split("-")[0])
-        except ValueError:
-            start = int(float(coords[index].split(":")[1].split("-")[0]))
-            print(coords[index])
-        try:
-            stop = int(coords[index].split(":")[1].split("-")[1])
-        except ValueError:
-            stop = int(float(coords[index].split(":")[1].split("-")[1]))
-        seq = seq[:]
-        padded_seq = kernel_width*'N' + seq + kernel_width*'N'
-        encoded_seq = encode_sequence(padded_seq, N = [0.25, 0.25, 0.25, 0.25])
-        encoded_seq_rc = encoded_seq[::-1,::-1]
-        conv_for = scan_model.predict(np.expand_dims(encoded_seq, axis = 0))[0]
-        conv_rc = scan_model.predict(np.expand_dims(encoded_seq[::-1,::-1], axis = 0))[0]
-        
-        for i in range(num_kernels):
-            if mode == 'anr':
-                matches_for = np.argwhere(conv_for[:,i] > 0)
-                num_matches_for = matches_for.shape[0]
-                for j in range(num_matches_for):
-                    num_sites += 1
-                    matched_seq = decode_sequence(encoded_seq[(matches_for[j,0]):(matches_for[j,0]+kernel_width)])
-                    motif_start = start + matches_for[j,0] - kernel_width
-                    motif_end = motif_start + kernel_width
-                    score = conv_for[matches_for[j,0], i]
-                    hits.append((chrom, motif_start, motif_end, score, "+", matched_seq, output_prefix + "_" + str(i+1), coords[index]))
-                
-        
-                matches_rc = np.argwhere(conv_rc[:,i] > 0)
-                num_matches_rc = matches_rc.shape[0]
-                for j in range(num_matches_rc):
-                    num_sites += 1
-                    matched_seq = decode_sequence(encoded_seq_rc[(matches_rc[j,0]):(matches_rc[j,0]+kernel_width)])
-                    motif_end = stop - matches_rc[j,0] + kernel_width
-                    motif_start = motif_end - kernel_width
-                    score = conv_rc[matches_rc[j,0], i]
-                    hits.append((chrom, motif_start, motif_end, score, "-", matched_seq, output_prefix + "_" + str(i+1), coords[index]))
-            else: # only return best match over both for and rc
-                if np.max(conv_for[:,i]) > 0 or np.max(conv_rc[:,i]) > 0:
-                    if np.max(conv_for[:,i]) > np.max(conv_rc[:,i]):
-                        match_for = np.argmax(conv_for[:,i] > 0)
-                        num_sites += 1
-                        matched_seq = decode_sequence(encoded_seq[match_for-2:(match_for+kernel_width+2)])
-                        motif_start = start + match_for - kernel_width
-                        motif_end = motif_start + kernel_width
-                        score = conv_for[match_for, i]
-                        hits.append((chrom, motif_start, motif_end, score, "+", matched_seq, output_prefix + "_" + str(i+1), coords[index]))
-                    else:
-                        match_rc = np.argmax(conv_rc[:,i] > 0)
-                        num_sites += 1
-                        matched_seq = decode_sequence(encoded_seq_rc[match_rc-2:(match_rc+kernel_width+2)])
-                        motif_end = stop - match_rc + kernel_width
-                        motif_start = motif_end - kernel_width
-                        score = conv_rc[match_rc, i]
-                        hits.append((chrom, motif_start, motif_end, score, "-", matched_seq, output_prefix + "_" + str(i+1), coords[index]))
-    sys.stdout.write('\n')                    
-    return hits
-
-def scan_seqs_for_kernels(seqs, conv_weights, output_prefix, mode = 'anr', scan_pos_only = True, encode_sequence=False):
+def scan_seqs_for_kernels(seqs, conv_weights, output_prefix, mode = 'anr', scan_pos_only = True, store_encoded=False):
     
     seqs_to_scan = [seq for seq in seqs if seq[1] == 1]
     kernel_width = conv_weights.shape[0]
@@ -105,8 +23,10 @@ def scan_seqs_for_kernels(seqs, conv_weights, output_prefix, mode = 'anr', scan_
             progress(index, len(seqs_to_scan), "Scanning sequences")
 
         
-        
-        encoded_seq = np.vstack((0.25*np.ones((kernel_width,4)), seq[0], 0.25*np.ones((kernel_width,4))))
+        if store_encoded:
+            encoded_seq = np.vstack((0.25*np.ones((kernel_width,4)), seq[0], 0.25*np.ones((kernel_width,4))))
+        else:
+            encoded_seq = np.vstack((0.25*np.ones((kernel_width,4)), encode_sequence(seq[0]), 0.25*np.ones((kernel_width,4))))
 #         encoded_seq = np.vstack((np.zeros((kernel_width,4)), seq[0], np.zeros((kernel_width,4))))
 
         encoded_seq_rc = encoded_seq[::-1,::-1]
