@@ -142,7 +142,7 @@ def main():
     dense_weights = model.get_layer('dense_1').get_weights()[0]
     model.get_layer('dense_1').set_weights([0.01 * dense_weights])
     
-    swa = SWA(num_epochs, prop = 0.2, interval = 1)
+    swa = SWA(num_epochs, prop = 0.1, interval = 1)
     
     
     schedule = SGDRScheduler(min_lr=min_learning_rate,
@@ -254,10 +254,10 @@ def main():
             f.write(json.dumps(motif_dict))
             
         #Plot results
-        dirpath = os.getcwd()
-        script_dir = os.path.dirname(os.path.realpath(__file__))
-        plots_file = output_prefix + ".pdf"
-        plot_cmd = ["Rscript", "--vanilla", script_dir + "/plot_results.R", output_json, plots_file]
-        junk = run(plot_cmd, stdout=PIPE, stderr=PIPE, universal_newlines=True)
+        # dirpath = os.getcwd()
+        # script_dir = os.path.dirname(os.path.realpath(__file__))
+        # plots_file = output_prefix + ".pdf"
+        # plot_cmd = ["Rscript", "--vanilla", script_dir + "/plot_results.R", output_json, plots_file]
+        # junk = run(plot_cmd, stdout=PIPE, stderr=PIPE, universal_newlines=True)
 if __name__ == '__main__':
     main()
