@@ -2,7 +2,7 @@ from keras.callbacks import Callback
 # from data_generators import DataGeneratorDinucShuffle
 from keras import backend as K
 import numpy as np
-from utils import progress
+from src.utils import progress
 import sys
 
 class SGDRScheduler(Callback):
@@ -74,7 +74,10 @@ class SGDRScheduler(Callback):
     def on_train_begin(self, logs={}):
         '''Initialize the learning rate to the minimum value at the start of training.'''
         logs = logs or {}
-        K.set_value(self.model.optimizer.lr, self.max_lr)
+        if self.shape == "cosine":
+            K.set_value(self.model.optimizer.lr, self.max_lr)
+        else:
+            K.set_value(self.model.optimizer.lr, self.min_lr)
 
     def on_batch_end(self, batch, logs={}):
         '''Record previous batch statistics and update the learning rate.'''
@@ -146,10 +149,11 @@ class ProgBar(Callback):
     def on_epoch_start(self, epoch, logs=None):
         self.start_time = time.time()
 
-    def on_epoch_end(self, epoch, logs=None):
+    def on_epoch_end(self, epoch, logs={}):
         self.stop_time = time.time()
+        results = [logs['loss'], logs['val_loss'], logs['acc'], logs['val_acc']]
         time_remaining = ((self.stop_time - self.start_time) * (self.num_epochs - epoch)) // 60
-        progress(epoch + 1, self.num_epochs, status='Training Model')
+        progress(epoch + 1, self.num_epochs, status="train_acc: {0:.2f} val_acc: {1:.2f}".format(logs['acc'], logs['val_acc']))
         
     def on_train_end(self, logs=None):
         sys.stdout.write("\n")

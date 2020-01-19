@@ -1,15 +1,18 @@
-from pybedtools import BedTool
 from pyfaidx import Fasta 
-from models import construct_scan_model
-from sequence import encode_sequence, decode_sequence
-from motif import seq_list_to_ppm, ppms_to_meme, trim_ppm_on_information
+from src.models import construct_scan_model
+from src.sequence import encode_sequence, decode_sequence
+from src.motif import seq_list_to_ppm, ppms_to_meme, trim_ppm_on_information
 import numpy as np
-from utils import progress
+from src.utils import progress
 import sys
 
-def scan_seqs_for_kernels(seqs, conv_weights, output_prefix, mode = 'anr', scan_pos_only = True, store_encoded=False):
+def scan_seqs_for_kernels(seqs, conv_weights, output_prefix, mode = 'anr', scan_pos_only = True, store_encoded=False, expand_by=0):
     
-    seqs_to_scan = [seq for seq in seqs if seq[1] == 1]
+    if scan_pos_only:
+        seqs_to_scan = [seq for seq in seqs if seq[1] == 1]
+    else:
+        seqs_to_scan = seqs
+        
     kernel_width = conv_weights.shape[0]
     num_kernels = conv_weights.shape[2]
     w2 = kernel_width // 2
@@ -44,7 +47,7 @@ def scan_seqs_for_kernels(seqs, conv_weights, output_prefix, mode = 'anr', scan_
                 if np.max(conv_for[:,i]) > np.max(conv_rc[:,i]):
                     match_for = np.argmax(conv_for[:,i] > 0)
                     num_sites += 1
-                    matched_seq = decode_sequence(encoded_seq[match_for-2:(match_for+kernel_width+2)])
+                    matched_seq = decode_sequence(encoded_seq[match_for-expand_by:(match_for+kernel_width+expand_by)])
                     motif_start = start + match_for - kernel_width
                     motif_end = motif_start + kernel_width
                     score = conv_for[match_for, i]
@@ -52,7 +55,7 @@ def scan_seqs_for_kernels(seqs, conv_weights, output_prefix, mode = 'anr', scan_
                 else:
                     match_rc = np.argmax(conv_rc[:,i] > 0)
                     num_sites += 1
-                    matched_seq = decode_sequence(encoded_seq_rc[match_rc-2:(match_rc+kernel_width+2)])
+                    matched_seq = decode_sequence(encoded_seq_rc[match_rc-expand_by:(match_rc+kernel_width+expand_by)])
                     motif_end = stop - match_rc + kernel_width
                     motif_start = motif_end - kernel_width
                     score = conv_rc[match_rc, i]

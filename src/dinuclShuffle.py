@@ -1,20 +1,15 @@
-import sys, string, random
-import sequence
+import copy, sys, string, random
+from collections import defaultdict
 
 # altschulEriksonDinuclShuffle.py
 # P. Clote, Oct 2003
 
-def computeCountAndLists(s):
+# Modified to allow custom dictionaries (Jack Huey, 8/29/2019)
 
+def computeCountAndLists(s):
+  nuclList = list(set(s))
   #Initialize lists and mono- and dinucleotide dictionaries
-  List = {} #List is a dictionary of lists
-  List['A'] = []; List['C'] = [];
-  List['G'] = []; List['T'] = [];
-  # FIXME: is this ok?
-  List['N'] = []
-  nuclList   = ["A","C","G","T","N"]
-  s       = s.upper()
-  #s       = s.replace("U","T")
+  List = defaultdict(list) #List is a dictionary of lists
   nuclCnt    = {}  #empty dictionary
   dinuclCnt  = {}  #empty dictionary
   for x in nuclList:
@@ -35,29 +30,18 @@ def computeCountAndLists(s):
   assert (nuclTotal==len(s))
   assert (dinuclTotal==len(s)-1)
   return nuclCnt,dinuclCnt,List
- 
+
  
 def chooseEdge(x,dinuclCnt):
   z = random.random()
-  denom=dinuclCnt[x]['A']+dinuclCnt[x]['C']+dinuclCnt[x]['G']+dinuclCnt[x]['T']+dinuclCnt[x]['N']
-  numerator = dinuclCnt[x]['A']
-  if z < float(numerator)/float(denom):
-    dinuclCnt[x]['A'] -= 1
-    return 'A'
-  numerator += dinuclCnt[x]['C']
-  if z < float(numerator)/float(denom):
-    dinuclCnt[x]['C'] -= 1
-    return 'C'
-  numerator += dinuclCnt[x]['G']
-  if z < float(numerator)/float(denom):
-    dinuclCnt[x]['G'] -= 1
-    return 'G'
-  numerator += dinuclCnt[x]['T']
-  if z < float(numerator)/float(denom):
-    dinuclCnt[x]['T'] -= 1
-    return 'T'
-  dinuclCnt[x]['N'] -= 1
-  return 'N'
+  denom = sum(nt for nt in dinuclCnt[x].values())
+  numerator = 0
+  for alpha in dinuclCnt[x]:
+    numerator += dinuclCnt[x][alpha]
+    if z < numerator/denom:
+      dinuclCnt[x][alpha] -= 1
+      return alpha
+  raise Exception("(BUG) Unreachable.")
 
 def connectedToLast(edgeList,nuclList,lastCh):
   D = {}
@@ -74,18 +58,14 @@ def connectedToLast(edgeList,nuclList,lastCh):
     if x!=lastCh and D[x]==0: return 0
   return 1
 
-def eulerian(s):
-  nuclCnt,dinuclCnt,List = computeCountAndLists(s)
+def eulerian(s, dinuclCnt):
+  dinuclCnt = copy.deepcopy(dinuclCnt)
   #compute nucleotides appearing in s
-  nuclList = []
-  for x in ["A","C","G","T","N"]:
-    if x in s: nuclList.append(x)
+  nuclList = list(set(s))
   #create dinucleotide shuffle L 
   firstCh = s[0]  #start with first letter of s
   lastCh  = s[-1]
-  edgeList = []
-  for x in nuclList:
-    if x!= lastCh: edgeList.append( [x,chooseEdge(x,dinuclCnt)] )
+  edgeList = list([x, chooseEdge(x,dinuclCnt)] for x in nuclList if x != lastCh)
   ok = connectedToLast(edgeList,nuclList,lastCh)
   return ok,edgeList,nuclList,lastCh
 
@@ -101,10 +81,11 @@ def shuffleEdgeList(L):
   return L
 
 def dinuclShuffle(s):
+  s = s.upper()
+  nuclCnt,dinuclCnt,List = computeCountAndLists(s)
   ok = 0
   while not ok:
-    ok,edgeList,nuclList,lastCh = eulerian(s)
-  nuclCnt,dinuclCnt,List = computeCountAndLists(s)
+    ok,edgeList,nuclList,lastCh = eulerian(s,dinuclCnt)
 
   #remove last edges from each vertex list, shuffle, then add back
   #the removed edges at end of vertex lists.

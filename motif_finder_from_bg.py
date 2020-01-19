@@ -1,21 +1,22 @@
 def construct_argument_parser():
     import argparse
     parser = argparse.ArgumentParser(description='Motif Finder')
-    parser.add_argument('-i', '--input', help='Bed or bedgraph containing positive regions', type=str, required=True)
-    parser.add_argument('-g', '--genome', help='Genome fasta file', type=str, required=True)
+    parser.add_argument('-bed', '--bed', help='Bed file containing positive regions', type=str, required=False)
+    parser.add_argument('-fasta', '--pos_fasta', help='Fasta file containing positive sequences', type=str, required=False)
+    parser.add_argument('-neg_fasta', '--neg_fasta', help='Fasta file containing negative regions', type=str, required=False)
+    parser.add_argument('-g', '--genome', help='Genome fasta file', type=str, required=False)
     parser.add_argument('-o', '--output_prefix', help='Prefix of output files', type=str, required=True)
-    parser.add_argument('-e', '--num_epochs', help='Number of epochs to train', type=int, required=False, default=2000)
-    parser.add_argument('-l', '--max_seq_length', help='Trim sequences greater than', type=str, required=False, default=200)
-    parser.add_argument('-int', '--intervals_per_epoch', help='Number of intervals to train on per epoch', type=int, required=False, default=5000)
-    parser.add_argument('-aug', '--aug_by', help='Perform data augmentation on training sequences', type=int, required=False, default=40)
+    parser.add_argument('-e', '--num_epochs', help='Number of epochs to train', type=int, required=False, default=1000)
+    parser.add_argument('-l', '--max_seq_length', help='Trim sequences greater than length provided', type=int, required=False, default=None)
+    parser.add_argument('-int', '--intervals_per_epoch', help='Number of sequences to train per epoch', type=int, required=False, default=5000)
     parser.add_argument('-b', '--batch_size', help='Batch size for training', type=int, required=False, default=32)
     parser.add_argument('-split', '--train_test_split', help='Proportion of data to use for training', type=float, required=False, default=0.90)
-    parser.add_argument('-k', '--num_kernels', help='Number of convolution kernels (motifs)', type=int, required=False, default=16)
-    parser.add_argument('-w', '--kernel_width', help='Width of convolution kernels', type=int, required=False, default=40)
+    parser.add_argument('-k', '--num_kernels', help='Number of convolution kernels (motifs)', type=int, required=False, default=32)
+    parser.add_argument('-w', '--kernel_width', help='Width of convolution kernels', type=int, required=False, default=20)
     parser.add_argument('-c', '--cycle_length', help='Cycle length for cyclical learning rate', type=int, required=False, default=1)
     parser.add_argument('-a', '--kernel_activation', help='Kernel activation function', type=str, required=False, default='linear')
     parser.add_argument('-gn', '--gaussian_noise', help='Absolute value of uniform distribution to draw noise from', type=float, required=False, default=0.0)
-    parser.add_argument('-l1', '--l1_reg', help='L1 Regularization', type=float, required=False, default=0.000000001) 
+    parser.add_argument('-l1', '--l1_reg', help='L1 Regularization', type=float, required=False, default=0.0) 
     parser.add_argument('-swa', '--swa_start', help='Epoch to start stochastic weight averaging', required = False, type = int, default = None)
     parser.add_argument('-max_lr', '--max_learning_rate', help='Maximum learning rate', required = False, type = float, default = 0.1)
     parser.add_argument('-min_lr', '--min_learning_rate', help='Minimum learning rate', required = False, type = float, default = 0.01)
@@ -23,47 +24,53 @@ def construct_argument_parser():
     parser.add_argument('-mode', '--mode', help='Mode for number of motif instances per sequence', required = False, type = str, choices = ["zoops", "anr"], default = "zoops")
     parser.add_argument('-curr', '--curriculum_mode', help='Use curriculum learning', required = False, type = bool, default = False)
     parser.add_argument('-model', '--model_file', help='Model from previous run to continue training', required = False, type = str, default = None)
+    parser.add_argument('-pretrain', '--pretrain', help='Pretrain model', required = False, type = str, default = "No")
+    parser.add_argument('-negs_from', '--negs_from', help='Draw negatives from flank or shuffle', required = False, type = str, default = "flank")
+    parser.add_argument('-refine', '--refine', help='List of PWMs to refine', required = False, type = str, default = None)
+
     return parser
 
 
 def main():
+    # Must set seed before import
     from numpy.random import seed
     seed(12)
     from tensorflow import set_random_seed
     set_random_seed(12)
     
-    from preprocess import bg_to_seqs, narrowpeak_to_seqs
-    from data_generators import DataGeneratorBg
-    from custom_callbacks import SWA, SGDRScheduler, ProgBar, AntiMotifChecker
-    from models import construct_model
-    from postprocess import hits_to_ppms, scan_seqs_for_kernels
-    from motif import ppms_to_meme
-    from pybedtools import BedTool
+    import tensorflow as tf
+    from src.preprocess import bed_to_seqs, fasta_to_seqs
+    from src.pretrain import pretrain_lr
+    from src.filter_seqs import filter_seqs
+    from src.data_generators import DataGeneratorBg
+    from src.custom_callbacks import SWA, SGDRScheduler, ProgBar, AntiMotifChecker
+    from src.custom_initializers import svd
+    from src.models import construct_model, construct_lr
+    from src.refine import refine_kernels
+    from src.postprocess import hits_to_ppms, scan_seqs_for_kernels
+    from src.motif import ppms_to_meme
     from pyfaidx import Fasta
     import numpy as np
     import random
     from keras.callbacks import EarlyStopping
     from keras import backend as K
-    from AdamW import AdamW
-    from tensorflow.contrib.opt import AdamWOptimizer
-    #from altschulEriksonDinuclShuffle import dinuclShuffle
-    from dinuclShuffle import dinuclShuffle
+    from src.dinuclShuffle import dinuclShuffle
     import json
-    from keras.optimizers import Adam
     from sklearn.metrics import roc_auc_score, roc_curve
     import pickle
     from subprocess import PIPE, run
     import os
-    from utils import read_hdf5
+    from src.utils import read_hdf5
     
     args = construct_argument_parser().parse_args()
-    input_file = args.input
+    bed = args.bed
+    pos_fasta = args.pos_fasta
+    neg_fasta = args.neg_fasta
     genome_fasta = args.genome
-    max_seq_len = int(args.max_seq_length)
+    max_seq_len = args.max_seq_length
     output_prefix = args.output_prefix
     num_epochs = args.num_epochs
     intervals_per_epoch = args.intervals_per_epoch
-    aug_by = args.aug_by
     batch_size = args.batch_size
     train_test_split = args.train_test_split
     num_kernels = args.num_kernels
@@ -77,18 +84,35 @@ def main():
     min_learning_rate = args.min_learning_rate
     train_only = args.train_only
     mode = args.mode
-    store_encoded = False
-    redraw = True
+    negs_from = args.negs_from
+    pretrain = args.pretrain
+    store_encoded = True
+    redraw = False
+    refine = args.refine
+        
+        
     if store_encoded:
         encode_sequence = False
     else:
         encode_sequence = True
         
 #     seqs = bg_to_seqs(input_file, genome_fasta, max_seq_len, store_encoded=store_encoded)  
-    seqs = narrowpeak_to_seqs(input_file, genome_fasta, max_seq_len, store_encoded=store_encoded, negs_from="flank")
+    if bed is not None:
+        seqs = bed_to_seqs(bed, genome_fasta, max_seq_len, store_encoded=store_encoded, negs_from=negs_from)
+    elif pos_fasta is not None:
+        seqs = fasta_to_seqs(pos_fasta, seq_len=None, neg_fasta=neg_fasta)
+    else:
+        Print("Must provide a bed or fasta file")
     
+    
+    if max_seq_len is None:
+        max_seq_len = np.max(np.array([seq[0].shape for seq in seqs]))
+        
+    print("Maximum sequence length {}".format(max_seq_len))
     num_pos = len([seq for seq in seqs if seq[1] == 1])
     num_neg = len([seq for seq in seqs if seq[1] == 0])
+    
+    random.shuffle(seqs)
     print("Number of positive sequences: {}".format(num_pos))
     print("Number of negative sequences: {}".format(num_neg))
     # Adjust sample weights based on relative class frequencies
@@ -97,65 +121,69 @@ def main():
 #             seqs[i][2] = num_neg / num_pos
             
     
-    # Adjsut sample weights based on rank
-#     seqs.sort(key= lambda seq: seq[3], reverse=True)
-#     for i, seq in enumerate(seqs):
-#         if seq[1] == 1:
-#             seqs[i][2] = seqs[i][2] - (i/(num_pos+num_neg))
-#             seqs[i][2] = seqs[i][2] * (1 - i/(num_pos+num_neg))
             
     random.shuffle(seqs)
-    train_seqs = seqs[:int(train_test_split*len(seqs))]
-    test_seqs = seqs[int(train_test_split*len(seqs)):]
+    if len(seqs) > 10000:
+        train_seqs = seqs[1024:]
+        test_seqs = seqs[:1024]
+    else:
+        train_seqs = seqs[:int(train_test_split*len(seqs))]
+        test_seqs = seqs[int(train_test_split*len(seqs)):]
+
     print("Training on {} sequences".format(len(train_seqs)))
     print("Testing on {} sequences".format(len(test_seqs)))
     if intervals_per_epoch is not None:
         steps_per_epoch = intervals_per_epoch // batch_size
-        validation_steps = steps_per_epoch // 3
     else:
         steps_per_epoch = len(train_seqs) // batch_size
         validation_steps = len(test_seqs) // batch_size
     
-    validation_steps = int((1 - train_test_split) * steps_per_epoch)
+    validation_steps = len(test_seqs) // batch_size
     
 #     train_seqs.sort(reverse=True, key= lambda seq: seq[3]) 
     
-    train_gen = DataGeneratorBg(train_seqs, max_seq_len, batch_size=batch_size,
-                                  augment_by=aug_by, pad_by=kernel_width, seqs_per_epoch=intervals_per_epoch, encode_sequence=encode_sequence, redraw=redraw)
+    train_gen = DataGeneratorBg(train_seqs, max_seq_len, batch_size=batch_size, pad_by=kernel_width, seqs_per_epoch=intervals_per_epoch, encode_sequence=encode_sequence, redraw=redraw)
 
-    test_gen = DataGeneratorBg(test_seqs, max_seq_len, batch_size=batch_size,
-                              augment_by=aug_by, pad_by=kernel_width, seqs_per_epoch=validation_steps*batch_size, encode_sequence=encode_sequence, redraw=False)
-        
-#     train_gen = DataGeneratorCurriculum(train_seqs, max_seq_len, batch_size=batch_size,
-#                                   augment_by=aug_by, pad_by=pad_by, seqs_per_epoch=intervals_per_epoch, encode_sequence=encode_sequence)
-
-#     test_gen = DataGeneratorBg(test_seqs, max_seq_len, batch_size=batch_size,
-#                               augment_by=aug_by, pad_by=pad_by, seqs_per_epoch=validation_steps*batch_size, encode_sequence=encode_sequence)
+    test_gen = DataGeneratorBg(test_seqs, max_seq_len, batch_size=batch_size, pad_by=kernel_width, seqs_per_epoch=validation_steps*batch_size, encode_sequence=encode_sequence, redraw=False)
     
+#     pretrain = False
+    if pretrain != "No":
+        conv_weights, dense_weights = pretrain_lr(train_gen, test_gen, motif_file=pretrain, k=num_kernels)
     
-    ## Define callbacks
-    
-#     adamw = AdamW(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=None, decay=0., weight_decay=0.025, batch_size=batch_size, samples_per_epoch=(batch_size * steps_per_epoch), epochs=num_epochs)
-    
+    if refine is not None:
+        num_kernels = 1
+        pwm = []
+        with open(refine) as f:
+            junk = f.readline()
+            for line in f:
+                pwm.append([float(x) for x in line.strip().split()])
+        pwm = np.array(pwm)
+        kernel_width = pwm.shape[0]
+        print(pwm.shape)
+                
     model = construct_model(num_kernels=num_kernels, kernel_width=kernel_width, seq_len=None, optimizer='adam', activation='linear', l1_reg=l1_reg, gaussian_noise = gaussian_noise)
     
-    dense_weights = model.get_layer('dense_1').get_weights()[0]
-    model.get_layer('dense_1').set_weights([0.01 * dense_weights])
+#     model.get_layer('conv1d_1').set_weights([svd()])
     
-    swa = SWA(num_epochs, prop = 0.1, interval = 1)
+    if pretrain != "No":
+        model.get_layer('conv1d_1').set_weights([conv_weights])
+        model.get_layer('dense_1').set_weights([dense_weights])
     
+    if refine:
+        model.get_layer('conv1d_1').set_weights([np.expand_dims(pwm, axis=2)])
+    
+    swa = SWA(num_epochs, prop = 0.2, interval = 1)
     
     schedule = SGDRScheduler(min_lr=min_learning_rate,
                              max_lr=max_learning_rate,
                              steps_per_epoch=steps_per_epoch,
                              lr_decay=1.0,
                              cycle_length=cycle_length,
-                             mult_factor=1.0)
+                             mult_factor=1.0, 
+                             shape="triangular")
     
 
     progbar = ProgBar(num_epochs)
-    anti_motif = AntiMotifChecker()
-#     callbacks_list = [schedule, progbar, anti_motif, swa]
     
     callbacks_list = [schedule, progbar, swa]
     history = model.fit_generator(train_gen,
@@ -170,36 +198,38 @@ def main():
                                   max_queue_size=10,
                                   verbose=0)
     
+    
     model_file = output_prefix + ".weights.h5"
     model.save_weights(model_file)
     
-    conv_weights = model.get_layer('conv1d_1').get_weights()[0]
-#     kernel_aurocs = []
-#     roc_curves = {}
-#     for i in range(num_kernels):
-#         sample_size = batch_size // 2
-#         temp_conv_weights = np.zeros((kernel_width, 4, num_kernels))
-#         temp_conv_weights[:,:,i] = conv_weights[:,:,i]
-        
-#         model.get_layer('conv1d_1').set_weights([temp_conv_weights])
-        
-#         eval_gen = DataGenerator2(test_seqs, max_seq_len, batch_size=batch_size,
-#                               augment_by=aug_by, pad_by=kernel_width, return_labels=False)
-#         eval_steps = int(np.floor(len(test_seqs) / batch_size))
-        
-#         y_eval = np.array([seq[1] for seq in test_seqs[:int(batch_size*eval_steps)]])
-        
-        
-#         y_pred = model.predict_generator(eval_gen, steps=eval_steps)
-        
-#         fpr, tpr, t = roc_curve(y_eval, y_pred)
-#         roc_curves[i] = np.array((fpr, tpr))
-        
-#         auc = roc_auc_score(y_eval, y_pred)
-#         print(auc)
-#         kernel_aurocs.append(auc)
+    conv_weights = model.get_layer("conv1d_1").get_weights()[0]
+    dense_weights = model.get_layer("dense_1").get_weights()[0]
     
-#     kernel_aurocs = np.array(kernel_aurocs)
+#     conv_weights = refine_kernels(conv_weights, dense_weights, train_gen, test_gen)
+    
+    kernel_aurocs = []
+    roc_curves = {}
+    for i in range(num_kernels):
+        sample_size = batch_size // 2
+        temp_conv_weights = np.zeros((kernel_width, 4, num_kernels))
+        temp_conv_weights[:,:,i] = conv_weights[:,:,i]
+        
+        model.get_layer('conv1d_1').set_weights([temp_conv_weights])
+        
+        eval_gen = DataGeneratorBg(test_seqs, max_seq_len, batch_size=batch_size, pad_by=kernel_width, seqs_per_epoch=validation_steps*batch_size, encode_sequence=encode_sequence, redraw=False, return_labels=False)
+        eval_steps = int(np.floor(len(test_seqs) / batch_size))
+        
+        y_eval = np.tile(np.array([1 for i in range(sample_size)]+[0 for i in range(sample_size)]), eval_steps)
+        
+        
+        y_pred = model.predict_generator(eval_gen, steps=eval_steps)
+        
+        fpr, tpr, t = roc_curve(y_eval, y_pred)
+        roc_curves[i] = np.array((fpr, tpr))
+        
+        auc = roc_auc_score(y_eval, y_pred)
+        kernel_aurocs.append(auc)
+    
     
 #     np.savetxt(output_prefix + ".kernel_aurocs", kernel_aurocs)
 #     pickle.dump(roc_curves, open(output_prefix + ".roc_curves.pkl", "wb"))
@@ -249,6 +279,8 @@ def main():
             
             motif_index = int(motif_id.split("_")[1]) - 1
             motif_dict[motif_id]["conv_kernel"] = conv_weights[:,:,motif_index].tolist()
+            motif_dict[motif_id]["auroc"] = kernel_aurocs[motif_index]
+            motif_dict[motif_id]["roc_curve"] = roc_curves[motif_index].tolist()
         output_json = output_prefix + ".json"
         with open(output_json, "w") as f:
             f.write(json.dumps(motif_dict))

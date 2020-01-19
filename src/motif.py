@@ -1,4 +1,4 @@
-from sequence import encode_sequence
+from src.sequence import encode_sequence
 import numpy as np
 
 def seq_list_to_ppm(seq_list):
