@@ -159,13 +159,14 @@ class ProgBar(Callback):
         sys.stdout.write("\n")
     
 class OverfitMonitor(Callback):
-    def __init__(self, max_delta=0.1, patience=5):
+    def __init__(self, max_delta=0.1, patience=5, restore_best_weights=False):
         super(Callback, self).__init__()
         self.max_delta = max_delta
         self.patience = patience
         self.best_loss = 100
         self.overfit = False
-       
+        self.restore_best_weights = restore_best_weights
+
     def on_train_begin(self, logs=None):
         self.count = 0
         
@@ -183,7 +184,7 @@ class OverfitMonitor(Callback):
             self.count = 0
             
     def on_train_end(self, logs=None):
-        if self.overfit:
+        if self.overfit and self.restore_best_weights:
             print("Setting weights to that of best model")
             self.model.set_weights(self.best_model_weights)
 

@@ -6,7 +6,7 @@ import numpy as np
 from src.utils import progress
 import sys
 
-def scan_seqs_for_kernels(seqs, conv_weights, output_prefix, mode = 'anr', scan_pos_only = True, store_encoded=False, expand_by=0):
+def scan_seqs_for_kernels(seqs, conv_weights, output_prefix, mode = 'anr', scan_pos_only = True, store_encoded=False, expand_by=2):
     
     if scan_pos_only:
         seqs_to_scan = [seq for seq in seqs if seq[1] == 1]
@@ -34,8 +34,8 @@ def scan_seqs_for_kernels(seqs, conv_weights, output_prefix, mode = 'anr', scan_
 
         encoded_seq_rc = encoded_seq[::-1,::-1]
         coord = seq[4]
-        start = int(coord.split(":")[1].split("-")[0])
-        stop = int(coord.split(":")[1].split("-")[1])
+        start = int(float(coord.split(":")[1].split("-")[0]))
+        stop = int(float(coord.split(":")[1].split("-")[1]))
         chrom = coord.split(":")[0]
         conv_for = scan_model.predict(np.expand_dims(encoded_seq, axis = 0))[0]
         conv_rc = scan_model.predict(np.expand_dims(encoded_seq_rc, axis = 0))[0]

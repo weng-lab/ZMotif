@@ -14,7 +14,7 @@ def construct_model(num_kernels=1, kernel_width=20, seq_len=None, dropout_prop=0
     if gaussian_noise > 0:
         noisy_seq = GaussianNoise(gaussian_noise)(seq_input)
         noisy_seq_rc = rc_op(noisy_seq)
-    
+    print(activation)
     shared_conv = Conv1D(num_kernels, kernel_width,
                          strides=1, padding='same', 
                          activation=activation,

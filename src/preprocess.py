@@ -21,7 +21,7 @@ def get_format(bed_file):
             print("Unrecognized file format provided")
             return None
             
-def bed_to_seqs(bed_file, genome_fasta, seq_len = None, store_encoded=False, negs_from="shuffle"):
+def bed_to_seqs(bed_file, genome_fasta, seq_len = None, store_encoded=False, negs_from="shuffle", weight_samples=True):
     fmt = get_format(bed_file)
     genome = Fasta(genome_fasta, as_raw=True, sequence_always_upper=True)
     seqs = []
@@ -108,7 +108,7 @@ def bed_to_seqs(bed_file, genome_fasta, seq_len = None, store_encoded=False, neg
             if len(seq[0]) == 0:
                 seqs.remove(seq)
     
-    if fmt == "bg":
+    if fmt in ["bg", "peak"] and weight_samples == True:
         print("Weighting samples by rank")
         seqs.sort(key= lambda seq: seq[3], reverse=True)
         num_seqs = len(seqs)
@@ -118,7 +118,7 @@ def bed_to_seqs(bed_file, genome_fasta, seq_len = None, store_encoded=False, neg
     print(seqs[-1])
     return seqs
  
-def fasta_to_seqs(pos_fasta, seq_len = None, neg_fasta = None):
+def fasta_to_seqs(pos_fasta, seq_len = None, neg_fasta = None, store_encoded=True):
     seqs = []
     with open(pos_fasta) as f:
         for i, line in enumerate(f):
@@ -126,11 +126,18 @@ def fasta_to_seqs(pos_fasta, seq_len = None, neg_fasta = None):
                 coord = line.strip().split()[0][1:]
                 
             else:
-                pos_seq = line.strip().split()[0]
-                seqs.append([encode_sequence(pos_seq, useN = "uniform"), 1, 1, 1, coord])
+                pos_seq = line.strip().split()[0].upper()
+                if store_encoded:
+                    seqs.append([encode_sequence(pos_seq, useN = "uniform"), 1, 1, 1, coord])
+                else:
+                    seqs.append([pos_seq, 1, 1, 1, coord])
+                    
                 if neg_fasta is None:
                     neg_seq = dinuclShuffle(pos_seq)
-                    seqs.append([encode_sequence(neg_seq, useN = "uniform"), 0, 1, 1, coord])
+                    if store_encoded:
+                        seqs.append([encode_sequence(neg_seq, useN = "uniform"), 0, 1, 1, coord])
+                    else:
+                        seqs.append([neg_seq, 0, 1, 1, coord])
     
     if neg_fasta is not None:
         with open(neg_fasta) as f:
@@ -139,8 +146,11 @@ def fasta_to_seqs(pos_fasta, seq_len = None, neg_fasta = None):
                     coord = line.strip().split()[0][1:]
 
                 else:
-                    neg_seq = line.strip().split()[0]
-                    seqs.append([encode_sequence(neg_seq, useN = "uniform"), 0, 1, 1, coord])
+                    neg_seq = line.strip().split()[0].upper()
+                    if store_encoded:
+                        seqs.append([encode_sequence(neg_seq, useN = "uniform"), 0, 1, 1, coord])
+                    else:
+                        seqs.append([neg_seq, 0, 1, 1, coord])
     return(seqs)
                 
                 

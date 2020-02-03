@@ -7,7 +7,8 @@ from src.dinuclShuffle import dinuclShuffle
 from keras.utils import Sequence
 from collections import defaultdict, Counter
 import random
-    
+from scipy.ndimage import gaussian_filter
+
 class DataGeneratorBg(Sequence):
     def __init__(self, seqs, max_seq_len, seqs_per_epoch=None, batch_size = 32, augment_by=0, pad_by = 0, background = 'uniform', return_labels = True, encode_sequence=True, shuffle_seqs=True, redraw=True, weight_samples=False):
         self.seqs = seqs
@@ -25,6 +26,7 @@ class DataGeneratorBg(Sequence):
         self.encode = encode_sequence
         self.epoch = 0
         self.redraw = redraw
+        self.gn_sigma = 0
         if self.redraw:
             self.redraw_every = int(np.ceil(2 * len(self.neg_seqs) / self.seqs_per_epoch))
             print("Will redraw negatives every {} epochs".format(self.redraw_every))
@@ -87,7 +89,10 @@ class DataGeneratorBg(Sequence):
                 output[i,start_index:(start_index + seq_len),:] = encode_sequence(seq[0], N = [0.25, 0.25, 0.25, 0.25])
             else:
                 output[i,start_index:(start_index + seq_len),:] = seq[0]
-            
+
+            if self.gn_sigma > 0:
+                output = gaussian_filter(output, signal = self.gn_sigma)
+                
             labels.append(seq[1])
             weights.append(seq[2])
         if self.return_labels:

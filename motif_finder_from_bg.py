@@ -27,7 +27,10 @@ def construct_argument_parser():
     parser.add_argument('-pretrain', '--pretrain', help='Pretrain model', required = False, type = str, default = "No")
     parser.add_argument('-negs_from', '--negs_from', help='Draw negatives from flank or shuffle', required = False, type = str, default = "flank")
     parser.add_argument('-refine', '--refine', help='List of PWMs to refine', required = False, type = str, default = None)
-
+    parser.add_argument('-weight_samples', '--weight_samples', help='Weight samples', required = False, type = bool, default = False)
+    parser.add_argument('-motif_db', '--motif_db', help='Motif database to compare to', required = False, type = str, default = None)
+    parser.add_argument('-redraw', '--redraw', help='Redraw negative samples', required = False, type = bool, default = False)
+    parser.add_argument('-stop_on_overfit', '--stop_on_overfit', help='Stop training when model overfits', required = False, type = bool, default = False)
     return parser
 
 
@@ -43,7 +46,7 @@ def main():
     from src.pretrain import pretrain_lr
     from src.filter_seqs import filter_seqs
     from src.data_generators import DataGeneratorBg
-    from src.custom_callbacks import SWA, SGDRScheduler, ProgBar, AntiMotifChecker
+    from src.custom_callbacks import SWA, SGDRScheduler, ProgBar, OverfitMonitor
     from src.custom_initializers import svd
     from src.models import construct_model, construct_lr
     from src.refine import refine_kernels
@@ -87,9 +90,13 @@ def main():
     negs_from = args.negs_from
     pretrain = args.pretrain
     store_encoded = True
-    redraw = False
+    redraw = args.redraw
+    if redraw:
+        store_encoded = False
     refine = args.refine
-        
+    weight_samples = args.weight_samples
+    motif_db = args.motif_db
+    stop_on_overfit = args.stop_on_overfit
         
     if store_encoded:
         encode_sequence = False
@@ -98,15 +105,21 @@ def main():
         
 #     seqs = bg_to_seqs(input_file, genome_fasta, max_seq_len, store_encoded=store_encoded)  
     if bed is not None:
-        seqs = bed_to_seqs(bed, genome_fasta, max_seq_len, store_encoded=store_encoded, negs_from=negs_from)
+        seqs = bed_to_seqs(bed, genome_fasta, max_seq_len,
+                           store_encoded=store_encoded,
+                           negs_from=negs_from,
+                           weight_samples=weight_samples)
     elif pos_fasta is not None:
-        seqs = fasta_to_seqs(pos_fasta, seq_len=None, neg_fasta=neg_fasta)
+        seqs = fasta_to_seqs(pos_fasta, seq_len=None, neg_fasta=neg_fasta, store_encoded=store_encoded)
     else:
         Print("Must provide a bed or fasta file")
     
     
     if max_seq_len is None:
-        max_seq_len = np.max(np.array([seq[0].shape for seq in seqs]))
+        if store_encoded:
+            max_seq_len = np.max(np.array([seq[0].shape for seq in seqs]))
+        else:
+            max_seq_len = np.max(np.array([len(seq[0]) for seq in seqs]))
         
     print("Maximum sequence length {}".format(max_seq_len))
     num_pos = len([seq for seq in seqs if seq[1] == 1])
@@ -161,7 +174,7 @@ def main():
         kernel_width = pwm.shape[0]
         print(pwm.shape)
                 
-    model = construct_model(num_kernels=num_kernels, kernel_width=kernel_width, seq_len=None, optimizer='adam', activation='linear', l1_reg=l1_reg, gaussian_noise = gaussian_noise)
+    model = construct_model(num_kernels=num_kernels, kernel_width=kernel_width, seq_len=None, optimizer='adam', activation=kernel_activation, l1_reg=l1_reg, gaussian_noise = gaussian_noise)
     
 #     model.get_layer('conv1d_1').set_weights([svd()])
     
@@ -182,10 +195,15 @@ def main():
                              mult_factor=1.0, 
                              shape="triangular")
     
-
+    
     progbar = ProgBar(num_epochs)
     
     callbacks_list = [schedule, progbar, swa]
+    
+    if stop_on_overfit:
+        overfit_monitor = OverfitMonitor()
+        callbacks_list.append(overfit_monitor)
+        
     history = model.fit_generator(train_gen,
                                   steps_per_epoch=steps_per_epoch,
                                   epochs=num_epochs,
@@ -257,8 +275,12 @@ def main():
 
         ppms_to_meme(raw_ppms, raw_meme_file)
         ppms_to_meme(trimmed_ppms, trimmed_meme_file)
+
+        if motif_db is None:
+            motif_db = "/home/andrewsg/motif_dbs/HOCOMOCOv11_full_HUMAN_mono_meme_format.meme"
+            
         
-        tomtom_command = ["tomtom", raw_meme_file, "/home/andrewsg/motif_dbs/HOCOMOCOv11_full_HUMAN_mono_meme_format.meme", "--text"]
+        tomtom_command = ["tomtom", raw_meme_file, motif_db, "--text"]
         result = run(tomtom_command, stdout=PIPE, stderr=PIPE, universal_newlines=True)
         tomtom_results = result.stdout.split("\n")
         tomtom_results = [line.split() for line in tomtom_results if len(line.split()) > 0]
