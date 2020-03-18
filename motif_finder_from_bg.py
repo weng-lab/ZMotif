@@ -17,7 +17,7 @@ def construct_argument_parser():
     parser.add_argument('-a', '--kernel_activation', help='Kernel activation function', type=str, required=False, default='linear')
     parser.add_argument('-gn', '--gaussian_noise', help='Absolute value of uniform distribution to draw noise from', type=float, required=False, default=0.0)
     parser.add_argument('-l1', '--l1_reg', help='L1 Regularization', type=float, required=False, default=0.0) 
-    parser.add_argument('-swa', '--swa_start', help='Epoch to start stochastic weight averaging', required = False, type = int, default = None)
+    parser.add_argument('-swa', '--swa', help='Proportion of models to average', required = False, type = float, default = 0.2)
     parser.add_argument('-max_lr', '--max_learning_rate', help='Maximum learning rate', required = False, type = float, default = 0.1)
     parser.add_argument('-min_lr', '--min_learning_rate', help='Minimum learning rate', required = False, type = float, default = 0.01)
     parser.add_argument('-train_only', '--train_only', help='Only train classifier', required = False, type = bool, default = False)
@@ -31,6 +31,10 @@ def construct_argument_parser():
     parser.add_argument('-motif_db', '--motif_db', help='Motif database to compare to', required = False, type = str, default = None)
     parser.add_argument('-redraw', '--redraw', help='Redraw negative samples', required = False, type = bool, default = False)
     parser.add_argument('-stop_on_overfit', '--stop_on_overfit', help='Stop training when model overfits', required = False, type = bool, default = False)
+    parser.add_argument('-rc', '--reverse_complement', help='Account for reverse complement', required = False, type = bool, default = True)
+    parser.add_argument('--no-rc', dest='reverse_complement off', action='store_false')
+    parser.add_argument('-seed', '--seed', help='PWM to seed kernels with', required = False, type = str, default = None)
+    parser.add_argument('-pad_by', '--pad_by', help='Number of nucleotides to pad sequence array with', required = False, type = int, default = None)
     return parser
 
 
@@ -43,7 +47,7 @@ def main():
     
     import tensorflow as tf
     from src.preprocess import bed_to_seqs, fasta_to_seqs
-    from src.pretrain import pretrain_lr
+    from src.pretrain import pretrain_lr, pretrain_rf
     from src.filter_seqs import filter_seqs
     from src.data_generators import DataGeneratorBg
     from src.custom_callbacks import SWA, SGDRScheduler, ProgBar, OverfitMonitor
@@ -82,13 +86,14 @@ def main():
     kernel_activation = args.kernel_activation
     gaussian_noise = args.gaussian_noise
     l1_reg = args.l1_reg
-    swa_start = args.swa_start
+    swa = args.swa
     max_learning_rate = args.max_learning_rate
     min_learning_rate = args.min_learning_rate
     train_only = args.train_only
     mode = args.mode
     negs_from = args.negs_from
     pretrain = args.pretrain
+    print(pretrain)
     store_encoded = True
     redraw = args.redraw
     if redraw:
@@ -97,13 +102,20 @@ def main():
     weight_samples = args.weight_samples
     motif_db = args.motif_db
     stop_on_overfit = args.stop_on_overfit
-        
+    curriculum = args.curriculum_mode
+    rc = args.reverse_complement
+    print(rc)
+    seed = args.seed
+    pad_by = args.pad_by
+    if pad_by is None:
+        pad_by = kernel_width
+    
+    
     if store_encoded:
         encode_sequence = False
     else:
         encode_sequence = True
         
-#     seqs = bg_to_seqs(input_file, genome_fasta, max_seq_len, store_encoded=store_encoded)  
     if bed is not None:
         seqs = bed_to_seqs(bed, genome_fasta, max_seq_len,
                            store_encoded=store_encoded,
@@ -128,11 +140,6 @@ def main():
     random.shuffle(seqs)
     print("Number of positive sequences: {}".format(num_pos))
     print("Number of negative sequences: {}".format(num_neg))
-    # Adjust sample weights based on relative class frequencies
-#     for i, seq in enumerate(seqs):
-#         if seq[1] == 1:
-#             seqs[i][2] = num_neg / num_pos
-            
     
             
     random.shuffle(seqs)
@@ -152,40 +159,47 @@ def main():
         validation_steps = len(test_seqs) // batch_size
     
     validation_steps = len(test_seqs) // batch_size
-    
-#     train_seqs.sort(reverse=True, key= lambda seq: seq[3]) 
+
+    if curriculum:
+        print("Sorting sequences")
+        train_seqs.sort(reverse=True, key= lambda seq: seq[3]) 
     
     train_gen = DataGeneratorBg(train_seqs, max_seq_len, batch_size=batch_size, pad_by=kernel_width, seqs_per_epoch=intervals_per_epoch, encode_sequence=encode_sequence, redraw=redraw)
 
     test_gen = DataGeneratorBg(test_seqs, max_seq_len, batch_size=batch_size, pad_by=kernel_width, seqs_per_epoch=validation_steps*batch_size, encode_sequence=encode_sequence, redraw=False)
     
+#     conv_weights = pretrain_rf(train_gen)
 #     pretrain = False
     if pretrain != "No":
         conv_weights, dense_weights = pretrain_lr(train_gen, test_gen, motif_file=pretrain, k=num_kernels)
     
-    if refine is not None:
+    if seed is not None:
         num_kernels = 1
         pwm = []
-        with open(refine) as f:
+        with open(seed) as f:
             junk = f.readline()
             for line in f:
+                print(line)
                 pwm.append([float(x) for x in line.strip().split()])
-        pwm = np.array(pwm)
+        pwm = np.transpose(np.array(pwm))
+        pwm += 1
+        print(pwm)
+        pwm = pwm / np.sum(pwm, axis=1, keepdims=True)
+        pwm = np.log2(pwm/0.25)
         kernel_width = pwm.shape[0]
-        print(pwm.shape)
-                
-    model = construct_model(num_kernels=num_kernels, kernel_width=kernel_width, seq_len=None, optimizer='adam', activation=kernel_activation, l1_reg=l1_reg, gaussian_noise = gaussian_noise)
-    
+               
+    model = construct_model(num_kernels=num_kernels, kernel_width=kernel_width, seq_len=None, optimizer='adam', activation=kernel_activation, l1_reg=l1_reg, gaussian_noise = gaussian_noise, rc = rc)
+#     model.get_layer('conv1d_1').set_weights([conv_weights])
 #     model.get_layer('conv1d_1').set_weights([svd()])
     
     if pretrain != "No":
         model.get_layer('conv1d_1').set_weights([conv_weights])
         model.get_layer('dense_1').set_weights([dense_weights])
     
-    if refine:
+    if seed:
         model.get_layer('conv1d_1').set_weights([np.expand_dims(pwm, axis=2)])
     
-    swa = SWA(num_epochs, prop = 0.2, interval = 1)
+    swa = SWA(num_epochs, prop = swa, interval = 1)
     
     schedule = SGDRScheduler(min_lr=min_learning_rate,
                              max_lr=max_learning_rate,
@@ -218,6 +232,11 @@ def main():
     
     
     model_file = output_prefix + ".weights.h5"
+    model_json = model.to_json()
+    json_file = output_prefix + ".model.json"
+    with open(json_file, "w") as f:
+        f.write(model_json)
+    
     model.save_weights(model_file)
     
     conv_weights = model.get_layer("conv1d_1").get_weights()[0]
@@ -256,10 +275,13 @@ def main():
     
     
     if not train_only:
-        
+        pos_seqs = [seq for seq in seqs if seq[1] == 1]
+#         print(len(pos_seqs))
+#         pos_seqs = filter_seqs(pos_seqs, model)
+#         print(len(pos_seqs))
         bed_file = output_prefix + ".bed"
 #         pos_hits = scan_fasta_for_kernels(output_prefix + ".pos.fasta", conv_weights, output_prefix, mode = mode, scan_pos_only = True)
-        pos_hits = scan_seqs_for_kernels([seq for seq in seqs if seq[1] == 1], conv_weights, output_prefix, mode = mode, scan_pos_only = True, store_encoded=store_encoded)
+        pos_hits = scan_seqs_for_kernels(pos_seqs, conv_weights, output_prefix, mode = mode, scan_pos_only = True, store_encoded=store_encoded)
         #neg_hits = scan_fasta_for_kernels(neg_fasta, model_file, output_prefix, scan_pos_only = True)
         with open(bed_file, "w") as f:
             #for hit in pos_hits + neg_hits:

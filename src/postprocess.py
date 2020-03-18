@@ -74,11 +74,14 @@ def hits_to_ppms(hits):
     for motif_id in motif_ids:
         seq_list = [hit[5] for hit in hits if hit[6] == motif_id]
         num_seqs = len(seq_list)
-        
-        raw_ppm = seq_list_to_ppm(seq_list)
-        trimmed_ppm = trim_ppm_on_information(raw_ppm, min_info = 0.25)
-        raw_ppms.append((motif_id, num_seqs, raw_ppm))
-        trimmed_ppms.append((motif_id, num_seqs, trimmed_ppm))
+        try:
+            raw_ppm = seq_list_to_ppm(seq_list)
+            trimmed_ppm = trim_ppm_on_information(raw_ppm, min_info = 0.25)
+            raw_ppms.append((motif_id, num_seqs, raw_ppm))
+            trimmed_ppms.append((motif_id, num_seqs, trimmed_ppm))
+        except:
+            print("There was a problem with {}".format(motif_id))
+            
         
     return raw_ppms, trimmed_ppms
 
@@ -96,20 +99,3 @@ def read_hdf5(path):
                 weights[f[key].name] = f[key].value
     return weights
 
-
-# from preprocess import bg_to_seqs, bg_to_fasta
-# import h5py
-
-# seqs = bg_to_seqs("/data/zusers/andrewsg/motif_discovery/371.bg", "/home/andrewsg/genome/hg38/hg38.fa", 500, store_encoded=True)
-# bg_to_fasta("/data/zusers/andrewsg/motif_discovery/371.bg", "/home/andrewsg/genome/hg38/hg38.fa", "test.fasta")
-# model_weights = read_hdf5("/data/zusers/andrewsg/motif_discovery/results/1448/1448.weights.h5")
-# print(model_weights)
-# conv_weights = model_weights['/conv1d_1/conv1d_1/kernel:0']
-# output_prefix = "test"
-# hits = scan_seqs_for_kernels(seqs, conv_weights, output_prefix, scan_pos_only = True)
-# hits = scan_fasta_for_kernels("test.fasta", conv_weights, output_prefix, scan_pos_only = True)
-# for hit in hits:
-#     print(hit[5])
-# raw_ppms, trimmed_ppms = hits_to_ppms(hits)
-# raw_meme_file = output_prefix + ".raw.meme"
-# ppms_to_meme(raw_ppms, raw_meme_file)

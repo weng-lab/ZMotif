@@ -9,10 +9,10 @@ def filter_seqs(seqs, model):
         y_pred = model.predict(np.expand_dims(seq[0], axis=0))
         label = seq[1]
         if label == 1:
-            if y_pred > 0.5:
+            if y_pred > 0.90:
                 new_seqs.append(seq)
         else:
-            if y_pred < 0.5:
+            if y_pred < 0.1:
                 new_seqs.append(seq)
     progress(i, len(seqs), "\n")
     return(new_seqs)

@@ -112,10 +112,9 @@ def bed_to_seqs(bed_file, genome_fasta, seq_len = None, store_encoded=False, neg
         print("Weighting samples by rank")
         seqs.sort(key= lambda seq: seq[3], reverse=True)
         num_seqs = len(seqs)
+        max_signal = seqs[0][3]
         for i, seq in enumerate(seqs):
-            seqs[i][2] = (num_seqs - i) / num_seqs
-    print(seqs[0])
-    print(seqs[-1])
+            seqs[i][2] = seqs[i][3] / max_signal
     return seqs
  
 def fasta_to_seqs(pos_fasta, seq_len = None, neg_fasta = None, store_encoded=True):

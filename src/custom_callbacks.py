@@ -104,7 +104,7 @@ class SGDRScheduler(Callback):
 
 class SWA(Callback):
 
-    def __init__(self, epochs_to_train, prop = 0.1, interval = 1,):
+    def __init__(self, epochs_to_train, prop = 0.2, interval = 1,):
         super(SWA, self).__init__()
         self.epochs_to_train = epochs_to_train
         self.prop = prop
@@ -126,6 +126,9 @@ class SWA(Callback):
     def on_train_end(self, logs=None):
         if self.epoch > 10:
             num_models_to_average = int(np.ceil(self.prop * self.epoch))
+            if num_models_to_average < 1:
+                print("Taking last model")
+                num_models_to_average = 1
 #         print(len(self.models_weights))
 #         print(len(self.models_weights[0]))
 #         print(self.models_weights[0][0].shape)
