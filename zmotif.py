@@ -93,7 +93,6 @@ def main():
     mode = args.mode
     negs_from = args.negs_from
     pretrain = args.pretrain
-    print(pretrain)
     store_encoded = True
     redraw = args.redraw
     if redraw:
@@ -104,7 +103,6 @@ def main():
     stop_on_overfit = args.stop_on_overfit
     curriculum = args.curriculum_mode
     rc = args.reverse_complement
-    print(rc)
     seed = args.seed
     pad_by = args.pad_by
     if pad_by is None:
@@ -127,6 +125,7 @@ def main():
         Print("Must provide a bed or fasta file")
     
     
+
     if max_seq_len is None:
         if store_encoded:
             max_seq_len = np.max(np.array([seq[0].shape for seq in seqs]))
@@ -143,12 +142,8 @@ def main():
     
             
     random.shuffle(seqs)
-    if len(seqs) > 10000:
-        train_seqs = seqs[1024:]
-        test_seqs = seqs[:1024]
-    else:
-        train_seqs = seqs[:int(train_test_split*len(seqs))]
-        test_seqs = seqs[int(train_test_split*len(seqs)):]
+    train_seqs = seqs[:int(train_test_split*len(seqs))]
+    test_seqs = seqs[int(train_test_split*len(seqs)):]
 
     print("Training on {} sequences".format(len(train_seqs)))
     print("Testing on {} sequences".format(len(test_seqs)))
@@ -164,9 +159,10 @@ def main():
         print("Sorting sequences")
         train_seqs.sort(reverse=True, key= lambda seq: seq[3]) 
     
-    train_gen = DataGeneratorBg(train_seqs, max_seq_len, batch_size=batch_size, pad_by=kernel_width, seqs_per_epoch=intervals_per_epoch, encode_sequence=encode_sequence, redraw=redraw)
+    print(encode_sequence)
+    train_gen = DataGeneratorBg(train_seqs, max_seq_len, batch_size=batch_size, pad_by=kernel_width, seqs_per_epoch=intervals_per_epoch, encode=encode_sequence, redraw=redraw)
 
-    test_gen = DataGeneratorBg(test_seqs, max_seq_len, batch_size=batch_size, pad_by=kernel_width, seqs_per_epoch=validation_steps*batch_size, encode_sequence=encode_sequence, redraw=False)
+    test_gen = DataGeneratorBg(test_seqs, max_seq_len, batch_size=batch_size, pad_by=kernel_width, seqs_per_epoch=validation_steps*batch_size, encode=encode_sequence, redraw=False)
     
 #     conv_weights = pretrain_rf(train_gen)
 #     pretrain = False
@@ -253,7 +249,7 @@ def main():
         
         model.get_layer('conv1d_1').set_weights([temp_conv_weights])
         
-        eval_gen = DataGeneratorBg(test_seqs, max_seq_len, batch_size=batch_size, pad_by=kernel_width, seqs_per_epoch=validation_steps*batch_size, encode_sequence=encode_sequence, redraw=False, return_labels=False)
+        eval_gen = DataGeneratorBg(test_seqs, max_seq_len, batch_size=batch_size, pad_by=kernel_width, seqs_per_epoch=validation_steps*batch_size, encode=encode_sequence, redraw=False, return_labels=False)
         eval_steps = int(np.floor(len(test_seqs) / batch_size))
         
         y_eval = np.tile(np.array([1 for i in range(sample_size)]+[0 for i in range(sample_size)]), eval_steps)

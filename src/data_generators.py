@@ -1,4 +1,4 @@
-from src.sequence import encode_sequence
+from src.sequence import encode_sequence, decode_sequence
 from numpy.random import seed
 import numpy as np
 import random
@@ -10,7 +10,7 @@ import random
 from scipy.ndimage import gaussian_filter
 
 class DataGeneratorBg(Sequence):
-    def __init__(self, seqs, max_seq_len, seqs_per_epoch=None, batch_size = 32, augment_by=0, pad_by = 0, background = 'uniform', return_labels = True, encode_sequence=True, shuffle_seqs=True, redraw=True, weight_samples=False):
+    def __init__(self, seqs, max_seq_len, seqs_per_epoch=None, batch_size = 32, augment_by=0, pad_by = 0, background = 'uniform', return_labels = True, encode=True, shuffle_seqs=True, redraw=True, weight_samples=False):
         self.seqs = seqs
         self.pos_seqs = [seq for seq in self.seqs if seq[1] == 1]
         self.neg_seqs = [seq for seq in self.seqs if seq[1] == 0]
@@ -26,7 +26,7 @@ class DataGeneratorBg(Sequence):
         self.pad_by = pad_by
         self.n_iter = 0
         self.return_labels = return_labels
-        self.encode = encode_sequence
+        self.encode = encode
         self.epoch = 0
         self.redraw = redraw
         self.gn_sigma = 0
@@ -35,6 +35,7 @@ class DataGeneratorBg(Sequence):
             self.redraw_every = int(np.ceil(2 * len(self.neg_seqs) / self.seqs_per_epoch))
             print("Will redraw negatives every {} epochs".format(self.redraw_every))
             
+        print(self.encode)
         self.pos_array = 0.25 * np.ones((self.num_pos, self.max_seq_len + 2*self.pad_by, 4))
         for i, seq in enumerate(self.pos_seqs):
             if self.encode:
@@ -72,13 +73,20 @@ class DataGeneratorBg(Sequence):
     def on_epoch_end(self):
         self.epoch += 1
         np.random.shuffle(self.pos_array)
-        np.random.shuffle(self.neg_array)
-#         if self.redraw:
-#             if (self.epoch % self.redraw_every) == 0:
-#                 #print("Redrawing negatives")
-#                 self.neg_seqs = []
-#                 for seq in self.pos_seqs:
-#                     self.neg_seqs.append([dinuclShuffle(seq[0]), 0, seq[2], seq[3], seq[4]])
+        if self.redraw:
+            if (self.epoch % self.redraw_every) == 0:
+                #print("Redrawing negatives")
+                self.neg_array = 0.25 * np.ones((self.num_pos, self.max_seq_len + 2*self.pad_by, 4))
+                for i, seq in enumerate(self.pos_seqs):
+                    seq_len = len(seq[0])
+                    start_index = self.pad_by + (self.max_seq_len - seq_len) // 2
+                    temp_seq = dinuclShuffle(seq[0])
+                    self.neg_array[i,start_index:start_index+seq_len,:] = encode_sequence(temp_seq, N = [0.25, 0.25, 0.25, 0.25])
+                    self.num_neg = self.neg_array.shape[0]
+                    
+                    
+        else:
+            np.random.shuffle(self.neg_array)
     @staticmethod
     def get_sample__(big_list, num_elements, sample_size, n_iter):
         start_index = (n_iter * sample_size) % (num_elements - sample_size)
