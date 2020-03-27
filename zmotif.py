@@ -162,7 +162,7 @@ def main():
     print(encode_sequence)
     train_gen = DataGeneratorBg(train_seqs, max_seq_len, batch_size=batch_size, pad_by=kernel_width, seqs_per_epoch=intervals_per_epoch, encode=encode_sequence, redraw=redraw)
 
-    test_gen = DataGeneratorBg(test_seqs, max_seq_len, batch_size=batch_size, pad_by=kernel_width, seqs_per_epoch=validation_steps*batch_size, encode=encode_sequence, redraw=False)
+    test_gen = DataGeneratorBg(test_seqs, max_seq_len, batch_size=batch_size, pad_by=kernel_width, seqs_per_epoch=validation_steps*batch_size, encode=encode_sequence, redraw=False, shuffle_seqs=False)
     
 #     conv_weights = pretrain_rf(train_gen)
 #     pretrain = False

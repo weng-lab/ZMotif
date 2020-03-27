@@ -34,8 +34,12 @@ class DataGeneratorBg(Sequence):
         if self.redraw:
             self.redraw_every = int(np.ceil(2 * len(self.neg_seqs) / self.seqs_per_epoch))
             print("Will redraw negatives every {} epochs".format(self.redraw_every))
-            
-        print(self.encode)
+        
+        self.shuffle_seqs = shuffle_seqs
+        self.shuffle_pos_every = int(2 * np.ceil(self.num_pos) / self.seqs_per_epoch)
+        self.shuffle_neg_every = int(2 * np.ceil(self.num_neg) / self.seqs_per_epoch)
+        print("Will shuffle positive sequences every {} epochs".format(self.shuffle_pos_every))
+        print("Will shuffle negative sequences every {} epochs".format(self.shuffle_neg_every))
         self.pos_array = 0.25 * np.ones((self.num_pos, self.max_seq_len + 2*self.pad_by, 4))
         for i, seq in enumerate(self.pos_seqs):
             if self.encode:
@@ -72,7 +76,14 @@ class DataGeneratorBg(Sequence):
     
     def on_epoch_end(self):
         self.epoch += 1
-        np.random.shuffle(self.pos_array)
+        if self.shuffle_seqs:
+            if (self.epoch % self.shuffle_pos_every) == 0:
+                #print("shuffling positive sequences")
+                np.random.shuffle(self.pos_array)
+            if (self.epoch % self.shuffle_neg_every) == 0:
+                np.random.shuffle(self.neg_array)
+                #print("shuffling negative sequences")
+            
         if self.redraw:
             if (self.epoch % self.redraw_every) == 0:
                 #print("Redrawing negatives")
@@ -86,7 +97,7 @@ class DataGeneratorBg(Sequence):
                     
                     
         else:
-            np.random.shuffle(self.neg_array)
+            pass
     @staticmethod
     def get_sample__(big_list, num_elements, sample_size, n_iter):
         start_index = (n_iter * sample_size) % (num_elements - sample_size)
