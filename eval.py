@@ -2,7 +2,7 @@ import sys
 import numpy as np
 from keras.models import load_model
 from src.sequence import encode_sequence
-from sklearn.metrics import roc_auc_score
+from sklearn.metrics import roc_auc_score, roc_curve
 from pyfaidx import Fasta
 from src.models import construct_model
 import h5py
@@ -78,3 +78,9 @@ print(auc)
 
 with open(acc + ".auroc", "w") as f:
     f.write(str(auc) + "\n")
+
+
+fpr, tpr, thresholds = roc_curve(y_true, y_pred)
+roc = np.transpose(np.vstack((fpr, tpr)))
+# auroc = auc(fpr, tpr)
+np.savetxt(acc + ".roc.txt", roc)

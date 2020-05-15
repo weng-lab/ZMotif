@@ -1,18 +1,13 @@
 import numpy as np
 from src.utils import progress
-
+    
 def filter_seqs(seqs, model):
-    num_bad = 0
-    new_seqs = []
-    for i, seq in enumerate(seqs):
-        progress(i, len(seqs), "Filtering bad sequences")
+    preds = []
+    pos_seqs = [seq for seq in seqs if seq[1] == 1]
+    for i, seq in enumerate(pos_seqs):
+        progress(i, len(pos_seqs), "Filtering bad sequences")
         y_pred = model.predict(np.expand_dims(seq[0], axis=0))
-        label = seq[1]
-        if label == 1:
-            if y_pred > 0.90:
-                new_seqs.append(seq)
-        else:
-            if y_pred < 0.1:
-                new_seqs.append(seq)
-    progress(i, len(seqs), "\n")
+        preds.append(y_pred[0,0])
+    print(sorted(preds(reverse=True)))
+    
     return(new_seqs)

@@ -3,6 +3,7 @@ from keras.callbacks import Callback
 from keras import backend as K
 import numpy as np
 from src.utils import progress
+from src.models import construct_model
 import sys
 
 class SGDRScheduler(Callback):
@@ -161,6 +162,38 @@ class ProgBar(Callback):
     def on_train_end(self, logs=None):
         sys.stdout.write("\n")
     
+
+    
+# class GNIncrementer(Callback):
+#     def __init__(self,
+#                  num_epochs):
+    
+#         self.num_epochs = num_epochs
+        
+#     def on_train_begin(self, logs={}):
+#         conv_weights = self.model.get_layer("conv1d_1").get_weights()[0]
+#         dense_weights = self.model.get_layer("dense_1").get_weights()[0]
+#         w = conv_weights.shape[0]
+#         k = conv_weights.shape[2]
+#         self.model = construct_model(num_kernels = k, kernel_width=w, gaussian_noise=0.2)
+#         self.model.set_weights([conv_weights, dense_weights])
+    
+#     def on_epoch_start(self, epoch, logs=None):
+#         pass
+
+#     def on_epoch_end(self, epoch, logs={}):
+#         if epoch == 10:
+#             conv_weights = self.model.get_layer("conv1d_1").get_weights()[0]
+#             dense_weights = self.model.get_layer("dense_1").get_weights()[0]
+#             w = conv_weights.shape[0]
+#             k = conv_weights.shape[2]
+#             self.model = construct_model(num_kernels = k, kernel_width=w, gaussian_noise=0.0)
+#             self.model.set_weights([conv_weights, dense_weights])
+        
+#     def on_train_end(self, logs=None):
+#         pass
+        
+        
 class OverfitMonitor(Callback):
     def __init__(self, max_delta=0.1, patience=5, restore_best_weights=False):
         super(Callback, self).__init__()

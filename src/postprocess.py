@@ -5,6 +5,7 @@ from src.motif import seq_list_to_ppm, ppms_to_meme, trim_ppm_on_information
 import numpy as np
 from src.utils import progress
 import sys
+import pickle
 
 def scan_seqs_for_kernels(seqs, conv_weights, output_prefix, mode = 'anr', scan_pos_only = True, store_encoded=False, expand_by=2):
     
@@ -41,30 +42,84 @@ def scan_seqs_for_kernels(seqs, conv_weights, output_prefix, mode = 'anr', scan_
         conv_rc = scan_model.predict(np.expand_dims(encoded_seq_rc, axis = 0))[0]
         
         for i in range(num_kernels):
-            if np.max(conv_for[:,i]) > 0 or np.max(conv_rc[:,i]) > 0:
-        
-#         for i in range(num_kernels):
-                if np.max(conv_for[:,i]) > np.max(conv_rc[:,i]):
-                    match_for = np.argmax(conv_for[:,i] > 0)
-                    num_sites += 1
-                    matched_seq = decode_sequence(encoded_seq[match_for-expand_by:(match_for+kernel_width+expand_by)])
-                    motif_start = start + match_for - kernel_width
-                    motif_end = motif_start + kernel_width
-                    score = conv_for[match_for, i]
-                    hits.append((chrom, motif_start, motif_end, score, "+", matched_seq, output_prefix + "_" + str(i+1), coord))
-                else:
-                    match_rc = np.argmax(conv_rc[:,i] > 0)
-                    num_sites += 1
-                    matched_seq = decode_sequence(encoded_seq_rc[match_rc-expand_by:(match_rc+kernel_width+expand_by)])
-                    motif_end = stop - match_rc + kernel_width
-                    motif_start = motif_end - kernel_width
-                    score = conv_rc[match_rc, i]
-                    hits.append((chrom, motif_start, motif_end, score, "-", matched_seq, output_prefix + "_" + str(i+1), coord))
+            if mode == 'zoops': # Only return strongest sequence from
+                if np.max(conv_for[:,i]) > 0 or np.max(conv_rc[:,i]) > 0:
+
+    #         for i in range(num_kernels):
+                    if np.max(conv_for[:,i]) > np.max(conv_rc[:,i]):
+                        match_for = np.argmax(conv_for[:,i] > 0)
+                        num_sites += 1
+                        matched_seq = decode_sequence(encoded_seq[match_for-expand_by:(match_for+kernel_width+expand_by)])
+                        motif_start = start + match_for - kernel_width
+                        motif_end = motif_start + kernel_width
+                        score = conv_for[match_for, i]
+                        hits.append((chrom, motif_start, motif_end, score, "+", matched_seq, output_prefix + "_" + str(i+1), coord))
+                    else:
+                        match_rc = np.argmax(conv_rc[:,i] > 0)
+                        num_sites += 1
+                        matched_seq = decode_sequence(encoded_seq_rc[match_rc-expand_by:(match_rc+kernel_width+expand_by)])
+                        motif_end = stop - match_rc + kernel_width
+                        motif_start = motif_end - kernel_width
+                        score = conv_rc[match_rc, i]
+                        hits.append((chrom, motif_start, motif_end, score, "-", matched_seq, output_prefix + "_" + str(i+1), coord))
+            else:
+                matches_for = np.argwhere(conv_for[:,0] > 0)[:,0].tolist()
+                matches_rc = np.argwhere(conv_rc[:,0] > 0)[:,0].tolist()
+    
+                for x in matches_for:
+                        motif_start = start + x - kernel_width
+                        motif_end = motif_start + kernel_width
+                        score = conv_for[x, i]
+                        matched_seq = decode_sequence(encoded_seq[x-expand_by:(x+kernel_width+expand_by)])
+                        hits.append((chrom, motif_start, motif_end, score, "+", matched_seq, output_prefix + "_" + str(i+1), coord))
+
+                for x in matches_rc:
+                        motif_end = stop - x + kernel_width
+                        motif_start = motif_end - kernel_width  
+                        score = conv_rc[x, i]
+                        matched_seq = decode_sequence(encoded_seq_rc[x-expand_by:(x+kernel_width+expand_by)])
+                        hits.append((chrom, motif_start, motif_end, score, "-", matched_seq, output_prefix + "_" + str(i+1), coord))
                     
     progress(len(seqs_to_scan), len(seqs_to_scan), "Scanning sequences")
     sys.stdout.write("\n")
     return hits
 
+def score_kernels(seqs, conv_weights, store_encoded=False):
+        
+    w = conv_weights.shape[0]
+    k = conv_weights.shape[2]
+    w2 = w // 2
+    
+    scores = {i : {j : {"label" : seq[1], "score" : 0} for j, seq in enumerate(seqs)} for i in range(k)}
+    
+    
+    scan_model = construct_scan_model(conv_weights)
+    for index, seq in enumerate(seqs):
+        if index % 1000 == 0:
+            progress(index, len(seqs), "Ranking")
+
+        
+        if store_encoded:
+            encoded_seq = np.vstack((0.25*np.ones((w,4)), seq[0], 0.25*np.ones((w,4))))
+        else:
+            encoded_seq = np.vstack((0.25*np.ones((w,4)), encode_sequence(seq[0]), 0.25*np.ones((w,4))))
+
+        encoded_seq_rc = encoded_seq[::-1,::-1]
+        conv_for = scan_model.predict(np.expand_dims(encoded_seq, axis = 0))[0]
+        conv_rc = scan_model.predict(np.expand_dims(encoded_seq_rc, axis = 0))[0]
+        
+        for i in range(k):
+            max_for = np.max(conv_for[:,i])
+            max_rc = np.max(conv_rc[:,i])
+            
+            if max_for > max_rc:
+                score = max_for
+            else:
+                score = max_rc
+                
+            scores[i][index]["score"] = score
+            
+    pickle.dump(scores, open("scores.pkl", "wb"))
 
 def hits_to_ppms(hits):
     motif_ids = sorted(set([hit[6] for hit in hits]))

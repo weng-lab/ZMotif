@@ -32,9 +32,10 @@ def construct_argument_parser():
     parser.add_argument('-redraw', '--redraw', help='Redraw negative samples', required = False, type = bool, default = False)
     parser.add_argument('-stop_on_overfit', '--stop_on_overfit', help='Stop training when model overfits', required = False, type = bool, default = False)
     parser.add_argument('-rc', '--reverse_complement', help='Account for reverse complement', required = False, type = bool, default = True)
-    parser.add_argument('--no-rc', dest='reverse_complement off', action='store_false')
+    parser.add_argument('--no-rc', dest='reverse_complement', action='store_false')
     parser.add_argument('-seed', '--seed', help='PWM to seed kernels with', required = False, type = str, default = None)
     parser.add_argument('-pad_by', '--pad_by', help='Number of nucleotides to pad sequence array with', required = False, type = int, default = None)
+    parser.add_argument('-x', '--expand_by', help='Number of nucleotides to expand multiple sequence alignments by', required = False, type = int, default = 2)
     return parser
 
 
@@ -49,17 +50,17 @@ def main():
     from src.preprocess import bed_to_seqs, fasta_to_seqs
     from src.pretrain import pretrain_lr, pretrain_rf
     from src.filter_seqs import filter_seqs
-    from src.data_generators import DataGeneratorBg
+    from src.data_generators import DataGeneratorBg, DataGeneratorCurriculum
     from src.custom_callbacks import SWA, SGDRScheduler, ProgBar, OverfitMonitor
     from src.custom_initializers import svd
     from src.models import construct_model, construct_lr
     from src.refine import refine_kernels
-    from src.postprocess import hits_to_ppms, scan_seqs_for_kernels
+    from src.postprocess import hits_to_ppms, scan_seqs_for_kernels, score_kernels
     from src.motif import ppms_to_meme
     from pyfaidx import Fasta
     import numpy as np
     import random
-    from keras.callbacks import EarlyStopping
+    from keras.callbacks import EarlyStopping, CSVLogger
     from keras import backend as K
     from src.dinuclShuffle import dinuclShuffle
     import json
@@ -67,7 +68,7 @@ def main():
     import pickle
     from subprocess import PIPE, run
     import os
-    from src.utils import read_hdf5
+    from src.utils import read_hdf5, progress
     
     args = construct_argument_parser().parse_args()
     bed = args.bed
@@ -102,7 +103,9 @@ def main():
     motif_db = args.motif_db
     stop_on_overfit = args.stop_on_overfit
     curriculum = args.curriculum_mode
+    expand_by = args.expand_by
     rc = args.reverse_complement
+    print(rc)
     seed = args.seed
     pad_by = args.pad_by
     if pad_by is None:
@@ -120,7 +123,9 @@ def main():
                            negs_from=negs_from,
                            weight_samples=weight_samples)
     elif pos_fasta is not None:
-        seqs = fasta_to_seqs(pos_fasta, seq_len=None, neg_fasta=neg_fasta, store_encoded=store_encoded)
+        seqs = fasta_to_seqs(pos_fasta, seq_len=None, 
+                             neg_fasta_file=neg_fasta, 
+                             store_encoded=store_encoded)
     else:
         Print("Must provide a bed or fasta file")
     
@@ -136,38 +141,38 @@ def main():
     num_pos = len([seq for seq in seqs if seq[1] == 1])
     num_neg = len([seq for seq in seqs if seq[1] == 0])
     
-    random.shuffle(seqs)
     print("Number of positive sequences: {}".format(num_pos))
     print("Number of negative sequences: {}".format(num_neg))
     
-            
+    random.seed(12)       
     random.shuffle(seqs)
     train_seqs = seqs[:int(train_test_split*len(seqs))]
     test_seqs = seqs[int(train_test_split*len(seqs)):]
 
     print("Training on {} sequences".format(len(train_seqs)))
     print("Testing on {} sequences".format(len(test_seqs)))
-    if intervals_per_epoch is not None:
-        steps_per_epoch = intervals_per_epoch // batch_size
-    else:
-        steps_per_epoch = len(train_seqs) // batch_size
-        validation_steps = len(test_seqs) // batch_size
-    
-    validation_steps = len(test_seqs) // batch_size
+    steps_per_epoch = intervals_per_epoch // batch_size
+    validation_steps = 10
 
     if curriculum:
         print("Sorting sequences")
         train_seqs.sort(reverse=True, key= lambda seq: seq[3]) 
     
-    print(encode_sequence)
-    train_gen = DataGeneratorBg(train_seqs, max_seq_len, batch_size=batch_size, pad_by=kernel_width, seqs_per_epoch=intervals_per_epoch, encode=encode_sequence, redraw=redraw)
+    train_gen = DataGeneratorBg(train_seqs, max_seq_len,
+                                    batch_size=batch_size,
+                                    pad_by=kernel_width,
+                                    seqs_per_epoch=intervals_per_epoch,
+                                    encode=encode_sequence,
+                                    redraw=redraw)
 
-    test_gen = DataGeneratorBg(test_seqs, max_seq_len, batch_size=batch_size, pad_by=kernel_width, seqs_per_epoch=validation_steps*batch_size, encode=encode_sequence, redraw=False, shuffle_seqs=False)
-    
-#     conv_weights = pretrain_rf(train_gen)
-#     pretrain = False
-    if pretrain != "No":
-        conv_weights, dense_weights = pretrain_lr(train_gen, test_gen, motif_file=pretrain, k=num_kernels)
+    test_gen = DataGeneratorBg(test_seqs, max_seq_len,
+                               batch_size=batch_size,
+                               pad_by=kernel_width,
+                               seqs_per_epoch=validation_steps*batch_size,
+                               encode=encode_sequence,
+                               redraw=False,
+                               shuffle_seqs=False)
+
     
     if seed is not None:
         num_kernels = 1
@@ -183,7 +188,65 @@ def main():
         pwm = pwm / np.sum(pwm, axis=1, keepdims=True)
         pwm = np.log2(pwm/0.25)
         kernel_width = pwm.shape[0]
-               
+    
+    
+    
+#     model = construct_model(num_kernels=1, kernel_width=kernel_width, seq_len=None, optimizer='adam', activation=kernel_activation, l1_reg=l1_reg, gaussian_noise = gaussian_noise, rc = rc)
+    
+#     schedule = SGDRScheduler(min_lr=min_learning_rate,
+#                              max_lr=max_learning_rate,
+#                              steps_per_epoch=steps_per_epoch,
+#                              lr_decay=1.0,
+#                              cycle_length=cycle_length,
+#                              mult_factor=1.0, 
+#                              shape="triangular")
+    
+#     progbar = ProgBar(10)
+#     callbacks_list = [schedule, progbar]
+#     history = model.fit_generator(train_gen,
+#                                   steps_per_epoch=steps_per_epoch,
+#                                   epochs=10,
+#                                   validation_data=test_gen,
+#                                   validation_steps=validation_steps,
+#                                   callbacks=callbacks_list,
+#                                   shuffle=True,
+#                                   use_multiprocessing=False,
+#                                   workers=1,
+#                                   max_queue_size=10,
+#                                   verbose=0)
+    
+    
+#     for i, seq in enumerate(seqs):
+#         progress(i, len(seqs), "Weighting sequences")
+#         label = seq[1]
+#         y_pred = model.predict(np.expand_dims(seq[0], axis=0))[0,0]
+#         if label == 1:
+#             seqs[i][2] = y_pred
+#         else:
+#             seqs[i][2] = 1 - y_pred
+    
+    
+    
+#     random.shuffle(seqs)
+#     train_seqs = seqs[:int(train_test_split*len(seqs))]
+#     test_seqs = seqs[int(train_test_split*len(seqs)):]
+#     train_gen = DataGeneratorBg(train_seqs, max_seq_len,
+#                                     batch_size=batch_size,
+#                                     pad_by=kernel_width,
+#                                     seqs_per_epoch=intervals_per_epoch,
+#                                     encode=encode_sequence,
+#                                     redraw=redraw)
+
+#     test_gen = DataGeneratorBg(test_seqs, max_seq_len,
+#                                batch_size=batch_size,
+#                                pad_by=kernel_width,
+#                                seqs_per_epoch=validation_steps*batch_size,
+#                                encode=encode_sequence,
+#                                redraw=False,
+#                                shuffle_seqs=False)
+    
+    
+    
     model = construct_model(num_kernels=num_kernels, kernel_width=kernel_width, seq_len=None, optimizer='adam', activation=kernel_activation, l1_reg=l1_reg, gaussian_noise = gaussian_noise, rc = rc)
 #     model.get_layer('conv1d_1').set_weights([conv_weights])
 #     model.get_layer('conv1d_1').set_weights([svd()])
@@ -208,7 +271,8 @@ def main():
     
     progbar = ProgBar(num_epochs)
     
-    callbacks_list = [schedule, progbar, swa]
+    csv_logger = CSVLogger(output_prefix + '.log.csv', append=True)
+    callbacks_list = [schedule, progbar, csv_logger, swa]
     
     if stop_on_overfit:
         overfit_monitor = OverfitMonitor()
@@ -238,7 +302,6 @@ def main():
     conv_weights = model.get_layer("conv1d_1").get_weights()[0]
     dense_weights = model.get_layer("dense_1").get_weights()[0]
     
-#     conv_weights = refine_kernels(conv_weights, dense_weights, train_gen, test_gen)
     
     kernel_aurocs = []
     roc_curves = {}
@@ -264,20 +327,28 @@ def main():
         kernel_aurocs.append(auc)
     
     
-#     np.savetxt(output_prefix + ".kernel_aurocs", kernel_aurocs)
-#     pickle.dump(roc_curves, open(output_prefix + ".roc_curves.pkl", "wb"))
+    np.savetxt(output_prefix + ".kernel_aurocs", kernel_aurocs)
+    pickle.dump(roc_curves, open(output_prefix + ".roc_curves.pkl", "wb"))
         
         
     
     
     if not train_only:
+#         score_kernels(seqs, conv_weights, store_encoded=store_encoded)
         pos_seqs = [seq for seq in seqs if seq[1] == 1]
 #         print(len(pos_seqs))
 #         pos_seqs = filter_seqs(pos_seqs, model)
 #         print(len(pos_seqs))
         bed_file = output_prefix + ".bed"
-#         pos_hits = scan_fasta_for_kernels(output_prefix + ".pos.fasta", conv_weights, output_prefix, mode = mode, scan_pos_only = True)
-        pos_hits = scan_seqs_for_kernels(pos_seqs, conv_weights, output_prefix, mode = mode, scan_pos_only = True, store_encoded=store_encoded)
+    
+        pos_hits = scan_seqs_for_kernels(pos_seqs,
+                                         conv_weights,
+                                         output_prefix,
+                                         mode = mode,
+                                         scan_pos_only = True,
+                                         store_encoded=store_encoded,
+                                         expand_by=expand_by)
+    
         #neg_hits = scan_fasta_for_kernels(neg_fasta, model_file, output_prefix, scan_pos_only = True)
         with open(bed_file, "w") as f:
             #for hit in pos_hits + neg_hits:
@@ -317,7 +388,7 @@ def main():
                 motif_dict[motif_id]["hoc_matches"] = ["No Match"]
                 motif_dict[motif_id]["hoc_p_values"] = [1]
             
-            motif_index = int(motif_id.split("_")[1]) - 1
+            motif_index = int(motif_id.split("_")[-1]) - 1
             motif_dict[motif_id]["conv_kernel"] = conv_weights[:,:,motif_index].tolist()
             motif_dict[motif_id]["auroc"] = kernel_aurocs[motif_index]
             motif_dict[motif_id]["roc_curve"] = roc_curves[motif_index].tolist()

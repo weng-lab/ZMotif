@@ -2,6 +2,7 @@ import numpy as np
 from pyfaidx import Fasta
 from src.sequence import encode_sequence
 from src.dinuclShuffle import dinuclShuffle
+from src.utils import progress
 
 def get_format(bed_file):
     with open(bed_file, "r") as f:
@@ -117,39 +118,46 @@ def bed_to_seqs(bed_file, genome_fasta, seq_len = None, store_encoded=False, neg
             seqs[i][2] = seqs[i][3] / max_signal
     return seqs
  
-def fasta_to_seqs(pos_fasta, seq_len = None, neg_fasta = None, store_encoded=True):
+def fasta_to_seqs(pos_fasta_file, seq_len = None, neg_fasta_file = None, store_encoded=True):
     seqs = []
-    with open(pos_fasta) as f:
-        for i, line in enumerate(f):
-            if i % 2 == 0:
-                coord = line.strip().split()[0][1:]
-                
-            else:
-                pos_seq = line.strip().split()[0].upper()
-                if store_encoded:
-                    seqs.append([encode_sequence(pos_seq, useN = "uniform"), 1, 1, 1, coord])
-                else:
-                    seqs.append([pos_seq, 1, 1, 1, coord])
-                    
-                if neg_fasta is None:
-                    neg_seq = dinuclShuffle(pos_seq)
-                    if store_encoded:
-                        seqs.append([encode_sequence(neg_seq, useN = "uniform"), 0, 1, 1, coord])
-                    else:
-                        seqs.append([neg_seq, 0, 1, 1, coord])
+    pos_fasta = Fasta(pos_fasta_file,
+                     sequence_always_upper=True,
+                     as_raw=True)
     
-    if neg_fasta is not None:
-        with open(neg_fasta) as f:
-            for i, line in enumerate(f):
-                if i % 2 == 0:
-                    coord = line.strip().split()[0][1:]
-
-                else:
-                    neg_seq = line.strip().split()[0].upper()
-                    if store_encoded:
-                        seqs.append([encode_sequence(neg_seq, useN = "uniform"), 0, 1, 1, coord])
-                    else:
-                        seqs.append([neg_seq, 0, 1, 1, coord])
+    
+    num_pos = len([seq[:] for seq in pos_fasta])
+    coords = list(pos_fasta.keys())
+    print("{} positive sequences provided".format(num_pos))
+    
+    for i, (seq, coord) in enumerate(zip(pos_fasta, coords)):
+        progress(i, num_pos, "Reading positive sequences")
+        if store_encoded:
+            seqs.append([encode_sequence(seq[:], useN = "uniform"), 1, 1, 1, coord])
+        else:
+            seqs.append([seq[:], 1, 1, 1, coord])
+         
+        if neg_fasta_file is None:
+            neg_seq = dinuclShuffle(seq[:])
+            if store_encoded:
+                seqs.append([encode_sequence(neg_seq, useN = "uniform"), 0, 1, 1, coord])
+            else:
+                seqs.append([neg_seq, 0, 1, 1, coord])
+    
+    if neg_fasta_file is not None:
+        neg_fasta = Fasta(neg_fasta_file,
+                     sequence_always_upper=True,
+                     as_raw=True)
+        
+        num_neg = len([seq[:] for seq in neg_fasta])
+        coords = list(neg_fasta.keys())
+        print("{} negative sequences provided".format(num_neg))
+        
+        for i, (seq, coord) in enumerate(zip(neg_fasta, coords)):
+            progress(i, num_neg, "Reading negative sequences")
+            if store_encoded:
+                seqs.append([encode_sequence(seq[:], useN = "uniform"), 0, 1, 1, coord])
+            else:
+                seqs.append([seq[:], 0, 1, 1, coord])
     return(seqs)
                 
                 
